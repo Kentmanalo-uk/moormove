@@ -21,7 +21,20 @@ app.use(helmet({
 app.use(cors({ origin: config.webOrigin }));
 app.use(express.json({ limit: '100kb' }));
 
-app.get('/api/health', (req, res) => res.json({ success: true, data: { app: 'moormove', ok: true } }));
+// Is the server up, and can it use its database? `db` says what is wrong in
+// one word (never the address or password), so a deploy can be checked from
+// a browser: ok | login-failed | unreachable | no-database | not-set-up | error.
+const DB_PROBLEMS = { P1000: 'login-failed', P1001: 'unreachable', P1003: 'no-database', P2021: 'not-set-up' };
+app.get('/api/health', async (req, res) => {
+  let db = 'ok';
+  try {
+    await require('./lib/prisma').setting.count();
+  } catch (err) {
+    db = DB_PROBLEMS[err.code] || (/Authentication failed|Access denied/i.test(err.message) ? 'login-failed' : 'error');
+    console.error('Health check: database', db, err.code || '', String(err.message).split('\n').pop());
+  }
+  res.status(db === 'ok' ? 200 : 503).json({ success: db === 'ok', data: { app: 'moormove', ok: db === 'ok', db } });
+});
 // How to reach MoorMove (help pages, before signing in too).
 app.get('/api/info', async (req, res) => {
   const s = await require('./lib/settings').get();
