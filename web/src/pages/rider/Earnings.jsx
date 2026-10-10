@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CheckCircle, Coins, Info, Receipt, TrendUp } from '@phosphor-icons/react';
+import { CheckCircle, Coins, Gift, HandCoins, Info, Receipt, TrendUp } from '@phosphor-icons/react';
 import { useLive } from '../../lib/hooks';
 import { date, dateTime, km, peso, plural } from '../../lib/format';
 import { Empty, Loading, PageHead, StatStrip } from '../../components/ui';
@@ -17,6 +17,11 @@ export default function Earnings() {
   if (!data) return <>{head}<Loading /></>;
   const max = Math.max(1, ...data.days.map((d) => d.earnings));
   const today = data.days[data.days.length - 1]?.date;
+  // Signed balance: the rider owes commission, or MoorMove owes the rider (free deliveries).
+  const direction = data.owedDirection || (data.owed > 0 ? 'RIDER_OWES' : data.owed < 0 ? 'MOORMOVE_OWES' : 'SETTLED');
+  const owes = direction === 'RIDER_OWES';
+  const owed = direction === 'MOORMOVE_OWES';
+  const owedAmount = owed ? (data.moormoveOwes || Math.abs(data.owed)) : data.owed;
 
   return (
     <>
@@ -56,10 +61,12 @@ export default function Earnings() {
                 {data.recent.map((j) => (
                   <li key={j.id}>
                     <Link to={`/rider/jobs/${j.id}`}>
-                      <span className="earn-list__icon"><Receipt size={20} weight="fill" /></span>
+                      <span className={`earn-list__icon${j.promo ? ' earn-list__icon--pink' : ''}`}>{j.promo ? <Gift size={20} weight="fill" /> : <Receipt size={20} weight="fill" />}</span>
                       <div>
                         <strong>{j.pickupBarangay} → {j.dropoffBarangay}</strong>
-                        <small className="muted">{dateTime(j.deliveredAt)} · fare {peso(j.fee)} − commission {peso(j.platformCut, { cents: true })}</small>
+                        <small className="muted">{dateTime(j.deliveredAt)} · {j.promo
+                          ? `free delivery${j.listFee ? ` (usually ${peso(j.listFee)})` : ''} · paid by MoorMove`
+                          : `fare ${peso(j.fee)} − commission ${peso(j.platformCut, { cents: true })}`}</small>
                       </div>
                       <span className="earn-list__amount">+{peso(j.riderEarning)}</span>
                     </Link>
@@ -71,36 +78,38 @@ export default function Earnings() {
         </div>
 
         <aside className="page-grid__aside stack">
-          <section className={`card owed-card${data.owed > 0 ? '' : ' owed-card--clear'}`}>
+          <section className={`card owed-card${owes ? '' : owed ? ' owed-card--owed' : ' owed-card--clear'}`}>
             <div className="owed-card__top">
-              <span className="owed-card__icon">{data.owed > 0 ? <Coins size={26} weight="fill" /> : <CheckCircle size={26} weight="fill" />}</span>
+              <span className="owed-card__icon">{owes ? <Coins size={26} weight="fill" /> : owed ? <HandCoins size={26} weight="fill" /> : <CheckCircle size={26} weight="fill" />}</span>
               <div>
-                <span>Commission to pay MoorMove</span>
-                <strong>{peso(data.owed, { cents: true })}</strong>
+                <span>{owed ? 'MoorMove owes you' : 'Commission to pay MoorMove'}</span>
+                <strong>{peso(owes || owed ? owedAmount : 0, { cents: true })}</strong>
               </div>
             </div>
             <p className="muted small">
-              {data.owed > 0
+              {owes
                 ? `From ${plural(data.owedJobs, 'delivery', 'deliveries')}. Pay it at the MoorMove office; it's recorded here once received.`
-                : "You're all paid up. Thank you!"}
+                : owed
+                  ? 'Your pay for free deliveries, after any commission you owe. Collect it at the MoorMove office; it shows here once paid.'
+                  : "You're all paid up. Thank you!"}
             </p>
           </section>
 
           <section className="section">
-            <div className="section__head"><h2>Commission paid</h2></div>
+            <div className="section__head"><h2>Payments</h2></div>
             {data.settlements.length ? (
               <ul className="earn-list">
                 {data.settlements.map((s) => (
                   <li key={s.id}>
                     <div className="earn-list__row">
                       <span className="earn-list__icon earn-list__icon--amber"><Coins size={20} weight="fill" /></span>
-                      <div><strong>{date(s.createdAt)}</strong>{s.note && <small className="muted">{s.note}</small>}</div>
-                      <span className="earn-list__amount earn-list__amount--ink">{peso(s.amount, { cents: true })}</span>
+                      <div><strong>{s.amount < 0 ? 'MoorMove paid you' : 'You paid commission'}</strong><small className="muted">{date(s.createdAt)}{s.note ? ` · ${s.note}` : ''}</small></div>
+                      <span className={`earn-list__amount${s.amount < 0 ? '' : ' earn-list__amount--ink'}`}>{s.amount < 0 ? '+' : ''}{peso(Math.abs(s.amount), { cents: true })}</span>
                     </div>
                   </li>
                 ))}
               </ul>
-            ) : <p className="section__body muted small">Payments you make at the office are listed here.</p>}
+            ) : <p className="section__body muted small">Commission you pay, and what MoorMove pays you, are listed here.</p>}
           </section>
         </aside>
       </div>

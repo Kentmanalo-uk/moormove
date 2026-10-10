@@ -25,9 +25,9 @@
 .dcard, .offer, .kpi, .ride-tile, .ride-card, .town-card, .help-card {
   transition: border-color var(--fast) ease, background-color var(--fast) ease, transform var(--mid) var(--ease);
 }
-.dcard:hover, .offer:hover, .kpi:hover, .ride-tile:hover, .ride-card:hover { transform: translateY(-1px); }
-.where-box__go, .kpi__go, .help-card__go { transition: transform var(--fast) var(--ease); }
-.where-box:hover .where-box__go, .kpi:hover .kpi__go, .help-card:hover .help-card__go { transform: translateX(3px); }
+.dcard:hover, .offer:hover, .ride-tile:hover, .ride-card:hover { transform: translateY(-1px); }
+.where-box__go, .help-card__go { transition: transform var(--fast) var(--ease); }
+.where-box:hover .where-box__go, .help-card:hover .help-card__go { transform: translateX(3px); }
 .faq__q svg { transition: transform var(--mid) var(--ease); }
 .switch span, .switch span::after { transition-timing-function: var(--ease); }
 
@@ -43,7 +43,7 @@
 
 /* Phones: as the page slides over the map, the map dims and drifts up a little. */
 @supports (animation-timeline: scroll()) {
-  @media (max-width: 899px) and (prefers-reduced-motion: no-preference) {
+  @media (max-width: 768px) and (prefers-reduced-motion: no-preference) {
     .map-page__shade { animation: map-shade linear both; animation-timeline: scroll(root); animation-range: 0 40vh; }
     .map-page__map > .route-map, .map-page__map > .map-picker { animation: map-drift linear both; animation-timeline: scroll(root); animation-range: 0 40vh; }
     .map-page__float::before { animation: fade-bar linear both; animation-timeline: scroll(root); animation-range: 30vh 42vh; }

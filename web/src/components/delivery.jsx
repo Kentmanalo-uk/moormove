@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, ChatText, CheckCircle, ClipboardText, MagnifyingGlass, MapPin, Moped, NavigationArrow, Package,
+  ArrowRight, ChatText, CheckCircle, ClipboardText, Gift, MagnifyingGlass, MapPin, MapTrifold, Moped, NavigationArrow, Package,
   Phone, Star, Storefront, XCircle,
 } from '@phosphor-icons/react';
 import { dateTime, JOB_STATUS, km, mapsLink, peso, plural, SIZES, smsLink, telLink, time, VEHICLES } from '../lib/format';
@@ -17,6 +17,56 @@ export function OrderBadge({ job, className = '' }) {
   );
 }
 
+/**
+ * A free-delivery promo job: the buyer pays no delivery fee (fee 0, listFee
+ * the usual fee) and MoorMove pays the rider's usual earning.
+ */
+export const isFree = (job) => Boolean(job?.promo) || (job?.listFee !== null && job?.listFee !== undefined && Number(job.fee) === 0);
+
+/** What MoorMove pays the rider on a free delivery. */
+export const moormovePays = (job) => (job.moormovePays > 0 ? job.moormovePays : job.riderEarning);
+
+/** "Free delivery" chip; with `line`, the sentence for riders under it. */
+export function FreeChip({ job, line = false, admin = false, className = '' }) {
+  if (!isFree(job)) return null;
+  const chip = (
+    <span className={`pill pill--pink free-chip ${className}`} title={job.promo?.title || undefined}>
+      <Gift size={14} weight="fill" /> Free delivery
+    </span>
+  );
+  if (!line) return chip;
+  return (
+    <span className="free-line">
+      {chip}
+      <span>{admin
+        ? <>Buyer pays no delivery fee{job.listFee ? ` (usually ${peso(job.listFee)})` : ''} · MoorMove pays the rider {peso(moormovePays(job))}</>
+        : <>Buyer pays no delivery fee · you earn <b>{peso(job.riderEarning)}</b>, paid by MoorMove</>}</span>
+    </span>
+  );
+}
+
+/** [pickup town, drop-off town] when a delivery goes from one town to another, else null. */
+export const townHop = (job) => {
+  const from = job.townName || job.town?.name || (typeof job.town === 'string' ? job.town : null);
+  const to = job.dropoffTownName || job.dropoffTown?.name || null;
+  const fromId = job.townId || job.town?.id;
+  const toId = job.dropoffTownId || job.dropoffTown?.id;
+  if (!from || !to) return null;
+  if ((fromId && toId && fromId === toId) || from === to) return null;
+  return [from, to];
+};
+
+/** "Calapan City → Baco" on deliveries between towns. */
+export function TownHop({ job, className = '' }) {
+  const hop = townHop(job);
+  if (!hop) return null;
+  return (
+    <span className={`town-hop ${className}`}>
+      <MapTrifold size={15} weight="fill" /> {hop[0]} <ArrowRight size={12} weight="bold" /> {hop[1]}
+    </span>
+  );
+}
+
 /** What the buyer pays the rider on an E-MOORM order (COD item money plus the fee, when the buyer pays it). */
 export const buyerPays = (job) => (job.feePaidBy === 'RECIPIENT' ? job.fee : 0) + (job.codAmount || 0);
 
@@ -24,6 +74,12 @@ export const buyerPays = (job) => (job.feePaidBy === 'RECIPIENT' ? job.fee : 0) 
 export const orderPayText = (job) => {
   const fee = peso(job.fee);
   const cod = peso(job.codAmount);
+  if (isFree(job)) {
+    const earn = peso(moormovePays(job));
+    return job.codAmount > 0
+      ? `Free delivery: collect only ${cod} from the buyer and bring it back to the shop. MoorMove pays your ${earn}.`
+      : `Free delivery: collect nothing from the buyer. MoorMove pays your ${earn}.`;
+  }
   if (job.feePaidBy === 'RECIPIENT') {
     return job.codAmount > 0
       ? `Collect ${peso(buyerPays(job))} from the buyer — ${cod} goes back to the shop, ${fee} is yours.`
@@ -115,13 +171,16 @@ const place = (s) => (s.barangay && !String(s.address || '').toLowerCase().inclu
 
 /** Pickup (A) and drop-off (B) (or `only` one), with call, text and directions when allowed. */
 export function RouteBlock({ job, contact = false, directions = false, only }) {
-  const stop = (s, letter, label) => (
+  // Between towns: each stop says its town too.
+  const hop = townHop(job);
+  const withTown = (s, town) => (hop && town && !String(s.address || '').toLowerCase().includes(town.toLowerCase()) ? `${place(s)}, ${town}` : place(s));
+  const stop = (s, letter, label, town) => (
     <li className="route__stop">
       <span className={`route__dot route__dot--${letter.toLowerCase()}`}>{letter}</span>
       <div className="route__text">
         <small className="route__label">{label}</small>
         <strong>{s.name}</strong>
-        <span>{place(s)}</span>
+        <span>{withTown(s, town)}</span>
         {s.notes && <span className="route__note">“{s.notes}”</span>}
         {(contact && s.phone) || directions ? (
           <div className="route__actions">
@@ -135,8 +194,8 @@ export function RouteBlock({ job, contact = false, directions = false, only }) {
   );
   return (
     <ol className="route">
-      {only !== 'dropoff' && stop(job.pickup, 'A', 'Pickup')}
-      {only !== 'pickup' && stop(job.dropoff, 'B', 'Drop-off')}
+      {only !== 'dropoff' && stop(job.pickup, 'A', 'Pickup', hop?.[0])}
+      {only !== 'pickup' && stop(job.dropoff, 'B', 'Drop-off', hop?.[1])}
     </ol>
   );
 }
@@ -198,11 +257,18 @@ export function MoneyBlock({ job, rider = false }) {
         </div>
       </div>
       <dl className="receipt">
-        <div className="kv"><dt>Fare</dt><dd>{peso(job.fee)}</dd></div>
-        <div className="kv"><dt>Paid by</dt><dd>{order
+        {isFree(job) ? (
+          <div className="kv"><dt>Fare</dt><dd>{job.listFee ? <s className="muted">{peso(job.listFee)}</s> : null} <span className="tone-pink">Free</span></dd></div>
+        ) : <div className="kv"><dt>Fare</dt><dd>{peso(job.fee)}</dd></div>}
+        {isFree(job) ? (
+          <div className="kv"><dt>Promo</dt><dd>{job.promo?.title || 'Free delivery'}</dd></div>
+        ) : <div className="kv"><dt>Paid by</dt><dd>{order
           ? (job.feePaidBy === 'SENDER' ? 'The shop, at pickup' : 'The buyer, at drop-off')
-          : (job.feePaidBy === 'SENDER' ? 'Sender, at pickup' : 'Recipient, at drop-off')}</dd></div>
-        <div className="kv"><dt>Payment</dt><dd>Cash</dd></div>
+          : (job.feePaidBy === 'SENDER' ? 'Sender, at pickup' : 'Recipient, at drop-off')}</dd></div>}
+        {!isFree(job) && <div className="kv"><dt>Payment</dt><dd>Cash</dd></div>}
+        {isFree(job) && job.riderEarning !== undefined && (
+          <div className="kv"><dt>{rider ? 'MoorMove pays you' : 'MoorMove pays the rider'}</dt><dd className="tone-green">{peso(moormovePays(job))}</dd></div>
+        )}
         {job.codAmount > 0 && <div className="kv"><dt>{order ? 'COD for the shop' : 'COD to collect'}</dt><dd className="tone-amber">{peso(job.codAmount)}</dd></div>}
         {order && buyerPays(job) > 0 && <div className="kv"><dt>Buyer pays you</dt><dd className="tone-amber">{peso(buyerPays(job))}</dd></div>}
         {rider && job.riderEarning !== undefined && (

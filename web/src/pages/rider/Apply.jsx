@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, ShieldCheck } from '@phosphor-icons/react';
+import { CaretRight, CheckCircle, MapPinArea, ShieldCheck } from '@phosphor-icons/react';
 import api from '../../api';
 import { BackBar, Field, Loading, PhotoField } from '../../components/ui';
 import { VehicleArt } from '../../components/art';
@@ -13,6 +13,7 @@ export default function Apply() {
   const navigate = useNavigate();
   const [towns, setTowns] = useState([]);
   const [form, setForm] = useState(null);
+  const [area, setArea] = useState('');
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -25,6 +26,7 @@ export default function Apply() {
           return;
         }
         setTowns(list);
+        setArea(rider.usesHomeTown ? '' : rider.areasSummary);
         setForm(Object.fromEntries([...TEXT_FIELDS, ...PHOTO_FIELDS].map((f) => [f, rider[f] || ''])));
       })
       .catch((err) => setError(err.message));
@@ -63,6 +65,20 @@ export default function Apply() {
 
   const save = async () => {
     await api.put('/rider/application', Object.fromEntries(TEXT_FIELDS.map((f) => [f, form[f]])));
+  };
+
+  // Save what's filled in, then pick the area (it starts from the home town).
+  const pickArea = async () => {
+    setBusy('area');
+    setError('');
+    try {
+      await save();
+      navigate('/rider/area?from=apply');
+    } catch (err) {
+      setErrors(err.errors);
+      setError(err.message);
+      setBusy('');
+    }
   };
 
   const saveForLater = async () => {
@@ -119,6 +135,16 @@ export default function Apply() {
             <Field label="Barangay" id="barangay" error={errors.barangay}>
               <input {...input('barangay')} placeholder="e.g. Poblacion" />
             </Field>
+            <button type="button" className="area-link" onClick={pickArea} disabled={Boolean(busy)}>
+              <MapPinArea size={24} weight="fill" />
+              <span>
+                <strong>Where do you deliver?</strong>
+                <small>{area
+                  ? `Your area: ${area}`
+                  : `Your whole home town${towns.find((t) => t.id === form.townId) ? ` (${towns.find((t) => t.id === form.townId).name})` : ''}. Add more towns, or only some barangays.`}</small>
+              </span>
+              {busy === 'area' ? <span className="spinner spinner--sm" /> : <CaretRight size={18} />}
+            </button>
           </section>
 
           <section className="card form-section">

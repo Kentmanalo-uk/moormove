@@ -17,6 +17,8 @@ const { ApiError } = require('../middleware/errors');
 const jobs = require('../lib/jobs');
 const partner = require('../lib/partner');
 const outbox = require('../lib/outbox');
+const areas = require('../lib/areas');
+const promos = require('../lib/promos');
 
 const router = express.Router();
 const UPLOADS = require('../config/env').uploadDir;
@@ -45,24 +47,49 @@ router.use((req, res, next) => {
   next();
 });
 
-/** Is MoorMove taking E-MOORM orders, and where. */
+/**
+ * Is MoorMove taking E-MOORM orders, and where. Each town says how many
+ * approved riders deliver in some part of it (riders).
+ */
 router.get('/status', async (req, res) => {
   const s = await settingsLib.get();
-  const towns = await prisma.town.findMany({
-    where: { isActive: true },
-    orderBy: { name: 'asc' },
-    select: { id: true, name: true, serviceOpen: true },
-  });
+  const [towns, counts, running] = await Promise.all([
+    prisma.town.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, serviceOpen: true },
+    }),
+    areas.townCounts(),
+    promos.runningNow(),
+  ]);
   res.json({
     success: true,
-    data: { open: Boolean(s.partnerOpen && s.bookingOpen), towns, maxDistanceKm: s.maxDistanceKm, maxCod: s.maxCod },
+    data: {
+      open: Boolean(s.partnerOpen && s.bookingOpen),
+      towns: towns.map((t) => ({ ...t, riders: counts.get(t.id)?.approved || 0 })),
+      maxDistanceKm: s.maxDistanceKm,
+      maxCod: s.maxCod,
+      // Free-delivery promos running now (townIds null: all towns, by the pickup's town).
+      promos: running.map((p) => ({
+        id: p.id, title: p.title, endsAt: p.endsAt, townIds: promos.townIdsOf(p), maxKm: p.maxKm === null ? null : Number(p.maxKm),
+      })),
+    },
   });
 });
 
 /** What a rider would cost for an order, or why MoorMove can't take it. */
 router.post('/quote', async (req, res) => {
-  const { available, reason, vehicleType, distanceKm, fee } = await partner.quoteOrder(req.body || {});
-  res.json({ success: true, data: { available, reason, vehicleType, distanceKm, fee } });
+  const {
+    available, reason, vehicleType, distanceKm, distanceSource, fee, listFee, promo,
+  } = await partner.quoteOrder(req.body || {});
+  // promo: a free-delivery promo runs (fee 0, listFee the usual fee); book
+  // the job with fee 0 and its promoId.
+  res.json({
+    success: true,
+    data: {
+      available, reason, vehicleType, distanceKm, distanceSource, fee, listFee, promo: available ? promo : null,
+    },
+  });
 });
 
 /** Book a rider for an order. The same order twice gives back the open job. */

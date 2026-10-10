@@ -14,7 +14,8 @@ const DEFAULTS = {
   },
   includedKm: 2,
   sizeSurcharge: { SMALL: 0, MEDIUM: 10, LARGE: 30 },
-  // Straight-line distance times this, for the roads in between.
+  // Fares use the km by road (lib/routing.js). Only when the route service
+  // is out: the straight-line distance times this, for the roads in between.
   roadFactor: 1.3,
   maxDistanceKm: 30,
   // MoorMove's share of each fee, in percent. The rest is the rider's.

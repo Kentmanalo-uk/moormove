@@ -1,21 +1,21 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  ArrowRight, Bell, Coins, MapPin, Moon, Power, SealCheck, WarningCircle,
+  ArrowRight, Bell, Coins, Gift, HandCoins, MapPin, MapPinArea, Moon, Power, SealCheck, WarningCircle,
 } from '@phosphor-icons/react';
 import api from '../../api';
 import { useAuth } from '../../auth';
 import { useLive, useShareLocation } from '../../lib/hooks';
-import { ago, JOB_STATUS, km, peso, plural, SIZES, VEHICLES } from '../../lib/format';
+import { ago, dateTime, JOB_STATUS, km, peso, plural, SIZES, VEHICLES } from '../../lib/format';
 import { RiderMap } from '../../components/maps';
-import { buyerPays, MiniRoute, OrderBadge, Progress } from '../../components/delivery';
-import { Avatar, Empty, Loading, MapPage, Plate, RiderPill, StatStrip, useToast } from '../../components/ui';
+import { buyerPays, FreeChip, isFree, MiniRoute, OrderBadge, Progress, TownHop } from '../../components/delivery';
+import { Avatar, Empty, Loading, MapPage, PageHead, Plate, RiderPill, StatStrip, useToast } from '../../components/ui';
 import { EmptyArt, VehicleArt } from '../../components/art';
 
 function Bellbutton() {
   const { unread } = useAuth();
   return (
-    <Link to="/notifications" className="round-btn" aria-label="Notifications">
+    <Link to="/notifications" className="round-btn only-phone" aria-label="Notifications">
       <Bell size={22} />
       {unread > 0 && <b className="badge">{unread}</b>}
     </Link>
@@ -23,14 +23,18 @@ function Bellbutton() {
 }
 
 function Head({ name }) {
+  return <PageHead title={`Hi, ${name.split(' ')[0]}`} brand="Rider"><Bellbutton /></PageHead>;
+}
+
+/** "Your area: Calapan City (whole town) · Change". */
+function AreaLine({ rider }) {
+  if (!rider.areasSummary) return null;
   return (
-    <header className="home-head">
-      <Link to="/profile" className="home-head__me">
-        <Avatar name={name} size="sm" />
-        <span><small>Hi,</small><strong>{name.split(' ')[0]}</strong></span>
-      </Link>
-      <div className="page-head__actions home-head__actions"><Bellbutton /></div>
-    </header>
+    <p className="area-line">
+      <MapPinArea size={16} weight="fill" />
+      <span>Your area: <b>{rider.areasSummary}</b></span>
+      <Link to="/rider/area">Change</Link>
+    </p>
   );
 }
 
@@ -69,6 +73,7 @@ function NotApproved({ rider, name }) {
         )}
         {!canEdit && s !== 'PENDING' && <Link to="/info/help" className="btn btn--white">Contact MoorMove</Link>}
       </section>
+      {['DRAFT', 'NEEDS_CHANGES', 'PENDING'].includes(s) && rider.townId && <AreaLine rider={rider} />}
 
       <section className="section section--plain">
         <div className="section__head"><h2>How to start</h2></div>
@@ -103,10 +108,12 @@ function JobOffer({ job }) {
         {job.awayKm !== null && <span className="offer__away"><MapPin size={14} weight="fill" /> {km(job.awayKm)} away</span>}
       </div>
       <OrderBadge job={job} />
+      <FreeChip job={job} line />
       <MiniRoute from={job.pickupBarangay} to={job.dropoffBarangay} />
+      <TownHop job={job} />
       <p className="offer__meta">
         <span>{km(job.distanceKm)} · {SIZES[job.packageSize].label}{job.source === 'EMOORM'
-          ? buyerPays(job) > 0 && <> · <b>Collect {peso(buyerPays(job))}</b></>
+          ? buyerPays(job) > 0 && <> · <b>{isFree(job) ? 'Collect only' : 'Collect'} {peso(buyerPays(job))}</b></>
           : job.codAmount > 0 && <> · <b>COD {peso(job.codAmount)}</b></>}</span>
         <span>{ago(job.createdAt)}</span>
       </p>
@@ -180,6 +187,19 @@ export default function RiderHome() {
         { label: 'Rating', value: data.rating ?? '—', sub: data.ratingCount ? plural(data.ratingCount, 'rating') : 'No ratings yet' },
       ]} />
 
+      {data.promos?.map((p) => (
+        <div key={p.id} className="promo-banner">
+          <Gift size={22} weight="fill" />
+          <span><b>{p.title}:</b> free delivery for buyers, you still earn your usual pay.{p.endsAt ? <small> Until {dateTime(p.endsAt)}</small> : null}</span>
+        </div>
+      ))}
+
+      {data.owedDirection === 'MOORMOVE_OWES' && data.moormoveOwes > 0 && (
+        <Link to="/rider/earnings" className="alert alert--ok owed-alert">
+          <HandCoins size={20} weight="fill" /> <span>MoorMove owes you <strong>{peso(data.moormoveOwes, { cents: true })}</strong> for free deliveries</span> <ArrowRight size={16} />
+        </Link>
+      )}
+
       {data.owed > 0 && (
         <Link to="/rider/earnings" className="alert alert--warn owed-alert">
           <Coins size={20} weight="fill" /> <span>Commission to pay MoorMove: <strong>{peso(data.owed, { cents: true })}</strong></span> <ArrowRight size={16} />
@@ -206,6 +226,7 @@ export default function RiderHome() {
             <span className="active-job__earn">{peso(active.riderEarning)}</span>
           </div>
           {active.source === 'EMOORM' && <OrderBadge job={active} className="pill--white" />}
+          {isFree(active) && <FreeChip job={active} className="pill--white" />}
           <MiniRoute light from={`${active.pickup.name} · ${active.pickup.barangay}`} to={`${active.dropoff.name} · ${active.dropoff.barangay}`} />
           <Progress status={active.status} />
           <span className="active-job__go">Open delivery <ArrowRight size={16} weight="bold" /></span>
@@ -217,13 +238,14 @@ export default function RiderHome() {
           <div className="section__head">
             <div>
               <h2>Deliveries near you</h2>
-              <p className="section__sub">{VEHICLES[rider.vehicleType]} · {rider.town?.name}</p>
+              <p className="section__sub">{VEHICLES[rider.vehicleType]} · pickup and drop-off in your area</p>
             </div>
             {online && offers && <span className="pill pill--green">{offers.jobs.length} open</span>}
           </div>
+          <AreaLine rider={rider} />
           <div className="section__body list-gap">
             {!online ? (
-              <Empty compact art="offline" title="You're offline">Tap Go online to start receiving deliveries in {rider.town?.name}.</Empty>
+              <Empty compact art="offline" title="You're offline">Tap Go online to start receiving deliveries in your area.</Empty>
             ) : !offers ? <Loading /> : !offers.jobs.length ? (
               <Empty compact art="offers" title="No deliveries right now">New ones appear here and on the map by themselves. Stay online.</Empty>
             ) : offers.jobs.map((j) => <JobOffer key={j.id} job={j} />)}

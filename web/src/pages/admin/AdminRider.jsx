@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Phone } from '@phosphor-icons/react';
+import { MapPinArea, PencilSimple, Phone } from '@phosphor-icons/react';
 import api from '../../api';
 import { useLive } from '../../lib/hooks';
 import { ago, dateTime, peso, plural, VEHICLES } from '../../lib/format';
 import { Avatar, BackBar, Empty, JobPill, Loading, PhotoGrid, Plate, RiderPill, StatStrip, useToast } from '../../components/ui';
 import { VehicleArt } from '../../components/art';
+import { AreaList } from '../../components/area';
 
 // The decisions an admin can make, by the rider's state.
 const ACTIONS = {
@@ -131,9 +132,25 @@ export default function AdminRider() {
         <StatStrip items={[
           { label: 'Deliveries', value: rider.stats.deliveries },
           { label: 'Rating', value: rider.stats.rating ? `★ ${rider.stats.rating}` : '—', sub: plural(rider.stats.ratingCount, 'rating') },
-          { label: 'Owes', value: peso(rider.stats.owed, { cents: true }), sub: `earned ${peso(rider.stats.earned)}`, to: '/admin/cash', tone: rider.stats.owed ? 'amber' : undefined },
+          rider.stats.owed < 0
+            ? { label: 'MoorMove owes them', value: peso(-rider.stats.owed, { cents: true }), sub: `earned ${peso(rider.stats.earned)}`, to: '/admin/cash', tone: 'blue' }
+            : { label: 'Owes', value: peso(rider.stats.owed, { cents: true }), sub: `earned ${peso(rider.stats.earned)}`, to: '/admin/cash', tone: rider.stats.owed ? 'amber' : undefined },
         ]} />
       ) : null}
+
+      <section className="section admin-row area-section">
+        <div className="section__head">
+          <div>
+            <h2><MapPinArea size={20} weight="fill" className="tone-green" /> Delivery area</h2>
+            <p className="section__sub">Gets deliveries whose pickup and drop-off are both inside it</p>
+          </div>
+          <Link to={`/admin/riders/${rider.id}/area`} className="btn btn--soft btn--sm"><PencilSimple size={16} /> Edit area</Link>
+        </div>
+        <div className="section__body">
+          <p className="area-section__sum">{rider.areasSummary || 'No area yet: the rider has no home town'}{rider.usesHomeTown && rider.areasSummary ? <span className="muted"> · their home town, nothing picked</span> : null}</p>
+          {!rider.usesHomeTown && <AreaList area={{ homeTownId: rider.townId, areas: rider.areas }} homeTownName={rider.town?.name} />}
+        </div>
+      </section>
 
       <div className="grid-2 admin-row">
         <section className="section">

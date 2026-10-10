@@ -15,15 +15,22 @@ export default function AdminRiders() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const status = TABS.includes(params.get('status')) ? params.get('status') : 'PENDING';
+  // ?townId: riders who deliver in some part of that town.
+  const townId = params.get('townId') || '';
+  const { data: towns } = useLive('/towns');
+  const townName = towns?.find((t) => t.id === townId)?.name;
+  const go = (next) => setParams({ status, ...(townId ? { townId } : {}), ...next }, { replace: true });
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   useEffect(() => {
     const t = setTimeout(() => setQuery(q.trim()), 300);
     return () => clearTimeout(t);
   }, [q]);
-  const { data: riders, loading, error } = useLive('/admin/riders', { params: { status, q: query || undefined }, every: 20000 });
+  const { data: riders, loading, error } = useLive('/admin/riders', { params: { status, q: query || undefined, townId: townId || undefined }, every: 20000 });
   const { data: summary } = useLive('/admin/summary', { every: 20000 });
-  const [art, title, text] = query ? ['search', 'Nothing matches', 'Try a name, email, phone or plate number.'] : EMPTY[status] || ['riders', 'No riders here', 'They will show up here.'];
+  const [art, title, text] = query ? ['search', 'Nothing matches', 'Try a name, email, phone or plate number.']
+    : townId ? ['towns', `No riders here deliver in ${townName || 'this town'}`, 'Riders whose area includes some of this town show up here. Try another tab or all towns.']
+      : EMPTY[status] || ['riders', 'No riders here', 'They will show up here.'];
   const place = (r) => [r.barangay, r.town?.name].filter(Boolean).join(', ') || 'No town yet';
 
   return (
@@ -32,12 +39,17 @@ export default function AdminRiders() {
       <div className="list-tools">
         <div className="tabs" role="tablist">
           {TABS.map((s) => (
-            <button key={s} type="button" role="tab" aria-selected={s === status} className={`tab${s === status ? ' is-on' : ''}`} onClick={() => setParams({ status: s }, { replace: true })}>
+            <button key={s} type="button" role="tab" aria-selected={s === status} className={`tab${s === status ? ' is-on' : ''}`} onClick={() => go({ status: s })}>
               {s === 'DRAFT' ? 'Not sent' : RIDER_STATUS[s].label}
               {summary?.counts[s] > 0 && <b>{summary.counts[s]}</b>}
             </button>
           ))}
         </div>
+        <select className="select-sm" value={townId} aria-label="Delivers in"
+          onChange={(e) => setParams({ status, ...(e.target.value ? { townId: e.target.value } : {}) }, { replace: true })}>
+          <option value="">All towns</option>
+          {(towns || []).map((t) => <option key={t.id} value={t.id}>Delivers in {t.name}</option>)}
+        </select>
         <label className="search">
           <MagnifyingGlass size={18} />
           <input placeholder="Search name, email, phone or plate" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search riders" />
@@ -50,7 +62,7 @@ export default function AdminRiders() {
           <div className="table-wrap only-wide">
             <table className="table">
               <thead>
-                <tr><th>Rider</th><th>Vehicle</th><th>Town</th><th>Mobile</th><th>Status</th><th>{status === 'PENDING' ? 'Sent' : 'Last seen'}</th></tr>
+                <tr><th>Rider</th><th>Vehicle</th><th>Delivery area</th><th>Mobile</th><th>Status</th><th>{status === 'PENDING' ? 'Sent' : 'Last seen'}</th></tr>
               </thead>
               <tbody>
                 {riders.map((r) => (
@@ -65,7 +77,7 @@ export default function AdminRiders() {
                       </Link>
                     </td>
                     <td>{r.vehicleType ? <span className="table__veh"><VehicleIcon type={r.vehicleType} size={20} /> {VEHICLES[r.vehicleType]} <Plate>{r.plateNumber}</Plate></span> : <span className="muted">—</span>}</td>
-                    <td>{place(r)}</td>
+                    <td className="table__area"><span>{r.areasSummary || place(r)}</span><small>Lives in {place(r)}</small></td>
                     <td>{r.user.phone}</td>
                     <td><RiderPill status={r.status} /></td>
                     <td className="muted">{status === 'PENDING' ? date(r.submittedAt) : (r.lastSeenAt ? ago(r.lastSeenAt) : '—')}</td>
@@ -85,6 +97,7 @@ export default function AdminRiders() {
                   <span className="person-row__text">
                     <strong>{r.user.fullName}</strong>
                     <small>{r.vehicleType ? VEHICLES[r.vehicleType] : 'No vehicle yet'}{r.plateNumber ? ` · ${r.plateNumber}` : ''} · {place(r)}</small>
+                    {r.areasSummary && <small className="person-row__area">Area: {r.areasSummary}</small>}
                   </span>
                   <CaretRight size={18} className="muted" />
                 </Link>

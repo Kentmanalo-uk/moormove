@@ -12,6 +12,8 @@ const { inProvince, isPoint } = require('./geo');
 const { text, failIf } = require('./check');
 const { ApiError } = require('../middleware/errors');
 const jobs = require('./jobs');
+const areas = require('./areas');
+const promos = require('./promos');
 
 // The account E-MOORM jobs are "created by". It can never sign in.
 const SYSTEM_EMAIL = 'partner@emoorm.system';
@@ -63,7 +65,14 @@ const partnerView = async (job) => {
     vehicleType: job.vehicleType,
     packageSize: job.packageSize,
     distanceKm: jobs.num(job.distanceKm),
+    // ROAD (by road) or ESTIMATE (the route service was out); null: an older job.
+    distanceSource: job.distanceSource || null,
     fee: jobs.num(job.fee),
+    // A free-delivery promo: fee 0, listFee the usual fee, and the rider's
+    // earning is paid by MoorMove (the shop pays the rider nothing).
+    listFee: jobs.num(job.listFee),
+    promo: job.promo ? { id: job.promo.id, title: job.promo.title } : null,
+    riderEarning: jobs.num(job.riderEarning),
     feePaidBy: job.feePaidBy,
     codAmount: jobs.num(job.codAmount),
     codReturnedAt: job.codReturnedAt,
@@ -97,24 +106,64 @@ const partnerView = async (job) => {
 const point = (p) => ({ lat: Number(p.lat), lng: Number(p.lng) });
 
 /**
- * What a delivery for an E-MOORM order would cost, and whether MoorMove can
- * take it: { available, reason, vehicleType, distanceKm, fee, town }.
+ * Which approved riders' areas hold a pickup and a drop-off place. When none
+ * holds both, the place to name: the one nobody delivers to (the drop-off
+ * when each is covered by someone, but never by the same rider).
  */
-const quoteOrder = async ({ townId, packageSize, pickup, dropoff }, settings) => {
+const uncoveredPlace = async (pickupPlace, dropoffPlace) => {
+  const where = { status: 'APPROVED', user: { isActive: true } };
+  const atPickup = await areas.ridersCovering([pickupPlace], { where });
+  if (atPickup.some((r) => areas.covers(r, dropoffPlace))) return null;
+  if (!atPickup.length && (await areas.ridersCovering([dropoffPlace], { where })).length) return pickupPlace;
+  return dropoffPlace;
+};
+
+/**
+ * What a delivery for an E-MOORM order would cost, and whether MoorMove can
+ * take it: { available, reason, vehicleType, distanceKm, distanceSource, fee, town, dropoffTown }.
+ * Optional: dropoffTownId (the buyer's town; default the pickup's) and
+ * pickup.barangay / dropoff.barangay. Without a rider whose area has both
+ * ends it is unavailable ("No MoorMove rider delivers to Lalud, Calapan City
+ * yet"); being online doesn't matter here.
+ */
+const quoteOrder = async ({ townId, dropoffTownId, packageSize, pickup, dropoff }, settings) => {
   const s = settings || await settingsLib.get();
   if (!jobs.SIZES.includes(packageSize)) throw new ApiError('Unknown package size', 422, { packageSize: 'SMALL, MEDIUM or LARGE' });
   if (!isPoint(pickup) || !isPoint(dropoff)) throw new ApiError('Both pins are needed', 422, { pin: 'Required' });
   const vehicleType = PARTNER_VEHICLE[packageSize];
-  const price = quote(s, { vehicleType, packageSize, pickup: point(pickup), dropoff: point(dropoff) });
+  // By road from the shop's pin to the buyer's (an ESTIMATE when the route service is out).
+  const price = await quote(s, { vehicleType, packageSize, pickup: point(pickup), dropoff: point(dropoff) });
   const town = townId ? await prisma.town.findFirst({ where: { id: String(townId), isActive: true } }) : null;
-  const answer = (reason) => ({
-    available: !reason, reason: reason || null, vehicleType, distanceKm: price.distanceKm, fee: price.fee, town,
+  const sameTown = !dropoffTownId || String(dropoffTownId) === String(townId);
+  const dropoffTown = sameTown ? town : await prisma.town.findFirst({ where: { id: String(dropoffTownId), isActive: true } });
+  const answer = (reason, promo = null) => ({
+    available: !reason,
+    reason: reason || null,
+    vehicleType,
+    distanceKm: price.distanceKm,
+    // ROAD (km by road) or ESTIMATE (straight line × the road factor).
+    distanceSource: price.distanceSource,
+    // A free-delivery promo: the buyer pays nothing; listFee is the usual fee.
+    fee: promo ? 0 : price.fee,
+    listFee: price.fee,
+    promo: promos.brief(promo),
+    town,
+    dropoffTown,
   });
   if (!s.partnerOpen || !s.bookingOpen) return answer('MoorMove is paused right now');
   if (!town || !town.serviceOpen) return answer(`MoorMove isn't open in ${town?.name || 'this town'} yet`);
+  if (!dropoffTown || !dropoffTown.serviceOpen) return answer(`MoorMove isn't open in ${dropoffTown?.name || "the buyer's town"} yet`);
   if (!inProvince(point(pickup)) || !inProvince(point(dropoff))) return answer('The pin is outside the area MoorMove serves');
   if (price.distanceKm > s.maxDistanceKm) return answer(`Too far for a rider (${price.distanceKm} km, up to ${s.maxDistanceKm} km)`);
-  return answer(null);
+  const missing = await uncoveredPlace(
+    { townId: town.id, barangay: text(pickup?.barangay, 80) || null },
+    { townId: dropoffTown.id, barangay: text(dropoff?.barangay, 80) || null },
+  );
+  if (missing) {
+    const name = areas.placeName(missing.barangay, missing.townId === town.id ? town.name : dropoffTown.name);
+    return answer(`No MoorMove rider delivers to ${name} yet`);
+  }
+  return answer(null, await promos.applicable({ townId: town.id, distanceKm: price.distanceKm }));
 };
 
 // Partners send the phone numbers they have: keep digits and a leading +.
@@ -158,13 +207,20 @@ const createOrderJob = async (body) => {
     throw new ApiError(q.reason, q.reason === 'MoorMove is paused right now' ? 503 : 422);
   }
   const errors = {};
-  const townName = q.town.name;
-  const pickup = readStop(b.pickup, 'pickup', errors, townName);
-  const dropoff = readStop(b.dropoff, 'dropoff', errors, townName);
+  const pickup = readStop(b.pickup, 'pickup', errors, q.town.name);
+  const dropoff = readStop(b.dropoff, 'dropoff', errors, q.dropoffTown.name);
   const fee = round2(Number(b.fee));
-  // The partner sets the fee (what the buyer paid), within reason.
-  if (!Number.isFinite(fee) || fee <= 0 || fee > q.fee * 3) {
-    errors.fee = `The fee must be more than ₱0 and at most ₱${q.fee * 3} (3 × MoorMove's ₱${q.fee})`;
+  const usual = q.listFee;
+  // A free delivery: the buyer was charged nothing at checkout under a promo
+  // that ran in the last 7 days (it may have ended since).
+  const promo = fee === 0 ? await promos.honourable(b.promoId) : null;
+  if (fee === 0 && !promo) {
+    errors.fee = b.promoId
+      ? "That promo isn't running, so the delivery can't be free"
+      : 'A free delivery needs the promoId of a MoorMove promo';
+  } else if (!promo && (!Number.isFinite(fee) || fee <= 0 || fee > usual * 3)) {
+    // The partner sets the fee (what the buyer paid), within reason.
+    errors.fee = `The fee must be more than ₱0 and at most ₱${usual * 3} (3 × MoorMove's ₱${usual})`;
   }
   const feePaidBy = ['SENDER', 'RECIPIENT'].includes(b.feePaidBy) ? b.feePaidBy : null;
   if (!feePaidBy) errors.feePaidBy = 'SENDER or RECIPIENT';
@@ -174,6 +230,10 @@ const createOrderJob = async (body) => {
 
   const externalCode = text(b.externalCode, 40) || null;
   const platformCut = round2((fee * settings.commissionPercent) / 100);
+  // A free delivery: the rider earns as usual and MoorMove pays it (platformCut below zero).
+  const money = promo
+    ? { ...promos.freeMoney(usual, settings), promoId: promo.id }
+    : { fee, platformCut, riderEarning: round2(fee - platformCut) };
   const createdById = await systemUser();
   let job;
   for (let attempt = 0; !job; attempt += 1) {
@@ -188,6 +248,7 @@ const createOrderJob = async (body) => {
           customerId: null,
           createdById,
           townId: q.town.id,
+          dropoffTownId: q.dropoffTown.id,
           vehicleType: q.vehicleType,
           pickupName: pickup.name,
           pickupPhone: pickup.phone,
@@ -206,9 +267,8 @@ const createOrderJob = async (body) => {
           packageSize: b.packageSize,
           packageDetails: text(b.packageDetails, 255) || `E-MOORM order${externalCode ? ` #${externalCode}` : ''}`,
           distanceKm: q.distanceKm,
-          fee,
-          platformCut,
-          riderEarning: round2(fee - platformCut),
+          distanceSource: q.distanceSource,
+          ...money,
           feePaidBy,
           codAmount,
           events: { create: { status: 'SEARCHING', actorId: createdById, note: `E-MOORM order${externalCode ? ` #${externalCode}` : ''}` } },

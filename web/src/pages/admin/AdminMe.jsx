@@ -1,69 +1,65 @@
-import { Link } from 'react-router-dom';
 import {
-  AddressBook, Bell, CaretRight, ChartBar, GearSix, Key, MapTrifold, Moped, NotePencil, Package, Question, SignOut, Wallet,
+  AddressBook, Bell, ChartBar, GearSix, Gift, Key, MapTrifold, Moped, NotePencil, Package, Plus, Question, SignOut, UsersThree, Wallet,
 } from '@phosphor-icons/react';
 import { useAuth } from '../../auth';
-import { Avatar, PageHead } from '../../components/ui';
+import { PageHead } from '../../components/ui';
+import { MeHeader, RowList, ToolGrid } from '../../components/me';
+import { useLive } from '../../lib/hooks';
 
-const GROUPS = [
-  ['Work', [
-    ['/admin', 'Overview', ChartBar],
-    ['/admin/deliveries', 'Deliveries', Package],
-    ['/admin/deliveries/new', 'New delivery', Package],
-    ['/admin/riders', 'Riders', Moped],
-    ['/admin/customers', 'Customers', AddressBook],
-    ['/admin/cash', 'Cash from riders', Wallet],
-  ]],
-  ['Setup', [
-    ['/admin/towns', 'Towns', MapTrifold],
-    ['/admin/settings', 'Fares & settings', GearSix],
-  ]],
-  ['Account', [
-    ['/admin/notifications', 'Notifications', Bell],
-    ['/admin/profile/edit', 'Edit profile', NotePencil],
-    ['/admin/profile/password', 'Change password', Key],
-    ['/info/help', 'Help center', Question],
-  ]],
+/*
+ * The admin's "Me" tab on phones: every admin place, in one spot (E-MOORM's
+ * admin Me). Each group is an array of rows: a new admin place (say "Free
+ * delivery" promos) is one more row, most likely in Setup.
+ */
+const WORK = [
+  { to: '/admin', label: 'Overview', icon: ChartBar },
+  { to: '/admin/deliveries', label: 'Deliveries', icon: Package },
+  { to: '/admin/riders', label: 'Riders', icon: Moped },
+  { to: '/admin/customers', label: 'Customers', icon: AddressBook },
+  { to: '/admin/cash', label: 'Cash from riders', icon: Wallet },
 ];
 
-/** The admin's "Me" tab on phones: every admin section, in one place. */
+const SETUP = [
+  { to: '/admin/towns', label: 'Towns', icon: MapTrifold, sub: 'Where MoorMove is open' },
+  { to: '/admin/coverage', label: 'Rider coverage', icon: UsersThree, sub: 'Riders who deliver in each town' },
+  { to: '/admin/promos', label: 'Free delivery', icon: Gift, sub: 'Promos where buyers pay no delivery fee' },
+  { to: '/admin/settings', label: 'Fares & settings', icon: GearSix, sub: 'Fares, rules and support contacts' },
+];
+
 export default function AdminMe() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, unread } = useAuth();
+  const { data } = useLive('/admin/summary', { every: 30000 });
   return (
     <>
       <PageHead title="Me" />
-      <section className="profile-hero">
-        <div className="profile-hero__cover" aria-hidden="true" />
-        <div className="profile-hero__body">
-          <Avatar name={user.fullName} size="xl" ring />
-          <div className="profile-hero__text">
-            <h2>{user.fullName}</h2>
-            <span className="muted small">{user.email}</span>
-            <span className="profile-hero__pills"><span className="pill pill--green">MoorMove admin</span></span>
-          </div>
+      <div className="me-card">
+        <MeHeader name={user.fullName} line={user.email} edit="/admin/profile/edit">
+          <span className="me-head__pills"><span className="pill pill--green">MoorMove admin</span></span>
+        </MeHeader>
+      </div>
+      <ToolGrid title="Quick tools" tools={[
+        { to: '/admin/deliveries/new', label: 'New delivery', icon: Plus, color: '#059669' },
+        { to: '/admin/riders?status=PENDING', label: 'Applications', icon: Moped, color: '#3b82f6', count: data?.counts?.PENDING },
+        { to: '/admin/cash', label: 'Cash', icon: Wallet, color: '#f59e0b' },
+        { to: '/admin/towns', label: 'Towns', icon: MapTrifold, color: '#8b5cf6' },
+        { to: '/admin/promos', label: 'Free delivery', icon: Gift, color: '#ec4899' },
+        { to: '/admin/coverage', label: 'Coverage', icon: UsersThree, color: '#14b8a6' },
+      ]} />
+      <div className="page-grid page-grid--even">
+        <div>
+          <RowList title="Work" rows={WORK} />
+          <RowList title="Setup" rows={SETUP} />
         </div>
-      </section>
-      {GROUPS.map(([title, rows]) => (
-        <section key={title} className="section">
-          <div className="section__head"><h2>{title}</h2></div>
-          <ul className="rows">
-            {rows.map(([to, label, Icon]) => (
-              <li key={to}>
-                <Link className="row" to={to}>
-                  <span className="row__icon row__icon--ink"><Icon size={22} /></span>
-                  <span className="row__text">{label}</span>
-                  <span className="row__end"><CaretRight size={18} /></span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-      <section className="section">
-        <ul className="rows rows--first">
-          <li><button type="button" className="row row--danger" onClick={signOut}><span className="row__icon"><SignOut size={22} /></span><span className="row__text">Log out</span></button></li>
-        </ul>
-      </section>
+        <div>
+          <RowList title="Account" rows={[
+            { to: '/admin/notifications', label: 'Notifications', icon: Bell, end: unread > 0 ? <span className="pill pill--red">{unread}</span> : null },
+            { to: '/admin/profile/edit', label: 'Edit profile', icon: NotePencil, sub: 'Name and mobile number' },
+            { to: '/admin/profile/password', label: 'Change password', icon: Key },
+            { to: '/info/help', label: 'Help center', icon: Question },
+          ]} />
+          <RowList rows={[{ label: 'Log out', icon: SignOut, onClick: signOut, danger: true }]} />
+        </div>
+      </div>
     </>
   );
 }

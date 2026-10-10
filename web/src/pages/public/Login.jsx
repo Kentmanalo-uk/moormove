@@ -4,7 +4,7 @@ import { Eye, EyeSlash } from '@phosphor-icons/react';
 import api from '../../api';
 import { useAuth } from '../../auth';
 import { Field } from '../../components/ui';
-import AuthLayout from '../../components/AuthLayout';
+import AuthLayout, { AuthTerms } from '../../components/AuthLayout';
 import { useInfo } from '../../lib/hooks';
 
 export default function Login() {
@@ -29,28 +29,32 @@ export default function Login() {
   };
 
   return (
-    <AuthLayout>
-      <h1>Welcome back</h1>
+    <AuthLayout other={{ to: '/register', label: 'Sign up' }}>
+      <h1 className="auth__title">Log In</h1>
       <p className="auth__lead">{customersWelcome ? 'Log in to send a package or start delivering.' : 'Log in to start delivering.'}</p>
       <form onSubmit={submit} noValidate>
-        <Field label="Email" id="email">
-          <input id="email" type="email" autoComplete="email" value={form.email}
+        <Field label="Email address" id="email">
+          <input id="email" type="email" autoComplete="email" placeholder="you@example.com" value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Password" id="password">
+        <div className="field">
+          <div className="auth__label-row">
+            <label htmlFor="password">Password</label>
+            <Link to="/info/help">Forgot?</Link>
+          </div>
           <div className="input-reveal">
-            <input id="password" type={show ? 'text' : 'password'} autoComplete="current-password" value={form.password}
+            <input id="password" type={show ? 'text' : 'password'} autoComplete="current-password" placeholder="Enter your password" value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })} />
             <button type="button" className="icon-btn" onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>
               {show ? <EyeSlash size={20} /> : <Eye size={20} />}
             </button>
           </div>
-        </Field>
-        <p className="auth__forgot"><Link to="/info/help">Forgot your password?</Link></p>
+        </div>
         {error && <p className="alert" role="alert">{error}</p>}
-        <button className="btn btn--primary btn--block btn--lg btn--shadow" disabled={busy}>{busy ? 'Logging in…' : 'Log in'}</button>
+        <button className="btn btn--primary btn--block btn--lg auth__submit" disabled={busy}>{busy ? 'Logging in…' : 'Log in'}</button>
       </form>
       <p className="auth__switch">New to MoorMove? <Link to="/register">{customersWelcome ? 'Create an account' : 'Sign up to ride'}</Link></p>
+      <AuthTerms />
     </AuthLayout>
   );
 }

@@ -39,6 +39,7 @@ model User {
   jobEvents      JobEvent[]
   notifications  Notification[]
   settlementsMade Settlement[]  @relation("SettlementAdmin")
+  promosCreated  Promo[]        @relation("PromoCreator")
 
   @@index([role, createdAt])
   @@map("users")
@@ -56,8 +57,10 @@ model Town {
   serviceOpen Boolean  @default(true) @map("service_open")
   syncedAt    DateTime @map("synced_at")
 
-  riders Rider[]
-  jobs   Job[]
+  riders      Rider[]
+  jobs        Job[]       @relation("JobTown")
+  dropoffJobs Job[]       @relation("JobDropoffTown")
+  riderAreas  RiderArea[]
 
   @@map("towns")
 }
@@ -129,11 +132,31 @@ model Rider {
 
   jobs        Job[]
   settlements Settlement[]
+  /// Where they deliver. None: their whole home town.
+  areas       RiderArea[]
 
   @@index([status, submittedAt])
   @@index([townId, status])
   @@index([townId, status, isOnline])
   @@map("riders")
+}
+
+/// A place a rider delivers in: a whole town (barangay null) or one barangay
+/// of it. A job is offered to a rider only when both its pickup and its
+/// drop-off are in the rider's places (see lib/areas.js).
+model RiderArea {
+  id        String   @id @default(uuid())
+  riderId   String   @map("rider_id")
+  rider     Rider    @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  townId    String   @map("town_id")
+  town      Town     @relation(fields: [townId], references: [id])
+  /// Null: the whole town.
+  barangay  String?  @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([riderId, townId, barangay])
+  @@index([townId])
+  @@map("rider_areas")
 }
 
 /// A photo someone uploaded (documents, proof of pickup and delivery). Kept
@@ -185,7 +208,8 @@ enum JobSource {
   EMOORM
 }
 
-/// A delivery: from a pickup point to a drop-off point in one town.
+/// A delivery: from a pickup point to a drop-off point (in the same town or
+/// the next one, within the distance limit).
 model Job {
   id     String    @id @default(uuid())
   code   String    @unique @db.VarChar(12)
@@ -205,8 +229,12 @@ model Job {
   createdById String  @map("created_by_id")
   createdBy   User    @relation("JobCreator", fields: [createdById], references: [id])
 
+  /// The pickup's town.
   townId      String      @map("town_id")
-  town        Town        @relation(fields: [townId], references: [id])
+  town        Town        @relation("JobTown", fields: [townId], references: [id])
+  /// The drop-off's town (null on older jobs: the pickup's town).
+  dropoffTownId String?   @map("dropoff_town_id")
+  dropoffTown   Town?     @relation("JobDropoffTown", fields: [dropoffTownId], references: [id], onDelete: SetNull)
   vehicleType VehicleType @map("vehicle_type")
 
   pickupName     String  @map("pickup_name") @db.VarChar(120)
@@ -230,8 +258,18 @@ model Job {
 
   // Money, fixed when booked
   distanceKm   Decimal  @map("distance_km") @db.Decimal(6, 2)
+  /// How distanceKm was found: ROAD (by road, from the route service) or
+  /// ESTIMATE (straight line × the road factor, the service was out). Null: older jobs.
+  distanceSource String? @map("distance_source") @db.VarChar(10)
+  /// What the sender or recipient pays the rider (0 on a free-delivery promo).
   fee          Decimal  @db.Decimal(10, 2)
-  /// MoorMove's commission out of the fee; the rest is the rider's.
+  /// The usual fee, when a promo made it free (null otherwise).
+  listFee      Decimal? @map("list_fee") @db.Decimal(10, 2)
+  /// The free-delivery promo, if any.
+  promoId      String?  @map("promo_id")
+  promo        Promo?   @relation(fields: [promoId], references: [id], onDelete: SetNull)
+  /// MoorMove's commission out of the fee; the rest is the rider's. Negative
+  /// on a free delivery: MoorMove owes the rider their usual earning.
   platformCut  Decimal  @map("platform_cut") @db.Decimal(10, 2)
   riderEarning Decimal  @map("rider_earning") @db.Decimal(10, 2)
   feePaidBy    FeePayer @default(SENDER) @map("fee_paid_by")
@@ -277,7 +315,36 @@ model Job {
   @@index([customerId, createdAt])
   @@index([riderId, status])
   @@index([createdAt])
+  @@index([dropoffTownId])
+  @@index([promoId])
   @@map("jobs")
+}
+
+/// A free-delivery promo set by MoorMove's admin: while it runs, deliveries
+/// picked up in its towns (and within maxKm) cost the buyer nothing, and
+/// MoorMove pays the rider their usual earning.
+model Promo {
+  id          String    @id @default(uuid())
+  title       String    @db.VarChar(80)
+  note        String?   @db.VarChar(255)
+  /// Off: paused by the admin.
+  active      Boolean   @default(true)
+  startsAt    DateTime  @map("starts_at")
+  /// Null: until the admin ends it.
+  endsAt      DateTime? @map("ends_at")
+  /// The pickup towns it applies in, as a list of town ids; null: all towns.
+  townIds     Json?     @map("town_ids")
+  /// Longest delivery it applies to; null: any.
+  maxKm       Decimal?  @map("max_km") @db.Decimal(6, 2)
+  createdById String    @map("created_by_id")
+  createdBy   User      @relation("PromoCreator", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  jobs Job[]
+
+  @@index([active, startsAt])
+  @@map("promos")
 }
 
 /// Every step of a delivery: who did it, when, and where they were.

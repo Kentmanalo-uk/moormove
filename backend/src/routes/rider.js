@@ -10,6 +10,8 @@ const { text, phone, isPhone, failIf } = require('../lib/check');
 const { haversineKm, isPoint } = require('../lib/geo');
 const { notifyAdmins } = require('../lib/notify');
 const jobs = require('../lib/jobs');
+const areas = require('../lib/areas');
+const promos = require('../lib/promos');
 const { publicUser } = require('./auth');
 
 const router = express.Router();
@@ -21,18 +23,33 @@ const DOCUMENTS = ['selfieUploadId', 'idUploadId', 'licenseUploadId', 'orcrUploa
 // The application can be changed only before it is sent, or when the admin
 // asked for changes.
 const EDITABLE = ['DRAFT', 'NEEDS_CHANGES'];
+// Where they deliver can be set while applying and changed once approved.
+const AREA_EDITABLE = ['DRAFT', 'NEEDS_CHANGES', 'PENDING', 'APPROVED'];
 
-const riderView = (rider) => ({
-  ...rider,
-  town: rider.town ? { id: rider.town.id, name: rider.town.name } : null,
-  reviewedById: undefined,
-});
+const riderInclude = { town: true, ...areas.areasInclude };
 
-const findRider = (userId) => prisma.rider.findUnique({ where: { userId }, include: { town: true } });
+/**
+ * The rider as the app sees it, with where they deliver: areas
+ * [{ townId, townName, serviceOpen, barangay|null }] (empty: their whole home
+ * town, usesHomeTown) and a one-line areasSummary.
+ */
+const riderView = (rider) => {
+  const area = areas.areaView(rider);
+  return {
+    ...rider,
+    town: rider.town ? { id: rider.town.id, name: rider.town.name } : null,
+    reviewedById: undefined,
+    areas: area.areas,
+    usesHomeTown: area.usesHomeTown,
+    areasSummary: area.summary,
+  };
+};
+
+const findRider = (userId) => prisma.rider.findUnique({ where: { userId }, include: riderInclude });
 
 /** Every account made as a rider has one; this covers any that don't. */
 const ensureRider = async (userId) => (await findRider(userId))
-  || prisma.rider.create({ data: { userId }, include: { town: true } });
+  || prisma.rider.create({ data: { userId }, include: riderInclude });
 
 router.get('/me', async (req, res) => {
   const rider = await ensureRider(req.user.id);
@@ -86,7 +103,7 @@ router.put('/application', async (req, res) => {
   }
   failIf(errors);
 
-  const updated = await prisma.rider.update({ where: { id: rider.id }, data, include: { town: true } });
+  const updated = await prisma.rider.update({ where: { id: rider.id }, data, include: riderInclude });
   res.json({ success: true, data: riderView(updated) });
 });
 
@@ -123,7 +140,7 @@ router.post('/application/submit', async (req, res) => {
   const updated = await prisma.rider.update({
     where: { id: rider.id },
     data: { status: 'PENDING', submittedAt: new Date() },
-    include: { town: true },
+    include: riderInclude,
   });
   await notifyAdmins({
     kind: 'rider',
@@ -132,6 +149,34 @@ router.post('/application/submit', async (req, res) => {
     link: `/admin/riders/${rider.id}`,
   });
   res.json({ success: true, data: riderView(updated) });
+});
+
+/* ── Where they deliver ───────────────────────────────────────────────── */
+
+/** { homeTownId, usesHomeTown, areas: [{ townId, townName, serviceOpen, barangay|null }], summary, limits } */
+const areasAnswer = (rider, notices = []) => ({
+  ...areas.areaView(rider),
+  limits: { towns: areas.MAX_TOWNS, places: areas.MAX_ROWS, barangayLength: areas.MAX_BARANGAY },
+  notices,
+});
+
+router.get('/areas', async (req, res) => {
+  const rider = await ensureRider(req.user.id);
+  res.json({ success: true, data: areasAnswer(rider) });
+});
+
+/**
+ * Replace where the rider delivers: { areas: [{ townId, barangay|null }] }
+ * (barangay null: the whole town; an empty list: their whole home town).
+ */
+router.put('/areas', async (req, res) => {
+  const rider = await ensureRider(req.user.id);
+  if (!AREA_EDITABLE.includes(rider.status)) {
+    throw new ApiError("Your rider account can't change where you deliver right now", 409);
+  }
+  const { rows, notices } = await areas.readAreas(req.body);
+  await areas.saveAreas(rider.id, rows);
+  res.json({ success: true, data: areasAnswer(await findRider(req.user.id), notices) });
 });
 
 /* ── Work ─────────────────────────────────────────────────────────────── */
@@ -172,7 +217,19 @@ router.get('/dashboard', async (req, res) => {
       deliveries: today._count._all,
       km: jobs.num(today._sum.distanceKm) || 0,
     };
+    // Signed: positive, the rider owes MoorMove commission; negative, MoorMove
+    // owes the rider (free-delivery promos). owedDirection says which.
     data.owed = jobs.num(owed._sum.platformCut) || 0;
+    data.owedDirection = promos.balance(data.owed).direction;
+    data.moormoveOwes = Math.max(0, -data.owed);
+    // Free-delivery promos running where the rider works.
+    const towns = new Set(areas.areaOf(rider).keys());
+    data.promos = (await promos.runningNow())
+      .filter((p) => {
+        const only = promos.townIdsOf(p);
+        return !only || only.some((id) => towns.has(id));
+      })
+      .map((p) => ({ ...promos.brief(p), note: p.note, townIds: promos.townIdsOf(p), maxKm: p.maxKm === null ? null : Number(p.maxKm) }));
     // E-MOORM COD the rider still has to bring back to the shop.
     const cash = await prisma.job.findMany({
       where: { riderId: rider.id, source: 'EMOORM', status: 'DELIVERED', codAmount: { gt: 0 }, codReturnedAt: null },
@@ -193,7 +250,7 @@ router.put('/online', async (req, res) => {
   const updated = await prisma.rider.update({
     where: { id: rider.id },
     data: { isOnline: online, ...(online ? { lastSeenAt: new Date() } : {}) },
-    include: { town: true },
+    include: riderInclude,
   });
   res.json({ success: true, data: riderView(updated) });
 });
@@ -210,26 +267,31 @@ router.post('/location', async (req, res) => {
 });
 
 /**
- * Open deliveries the rider can take: their town, their vehicle (E-MOORM
- * orders: any vehicle that carries the package).
+ * Open deliveries the rider can take: pickup and drop-off both in their area,
+ * their vehicle (E-MOORM orders: any vehicle that carries the package).
  */
 router.get('/jobs/available', async (req, res) => {
   const rider = await working(req.user.id);
   if (!rider.isOnline) return res.json({ success: true, data: { online: false, jobs: [] } });
-  const rows = await prisma.job.findMany({
-    where: { status: 'SEARCHING', townId: rider.townId, ...jobs.takeableBy(rider) },
+  const rows = (await prisma.job.findMany({
+    where: { status: 'SEARCHING', ...jobs.takeableBy(rider) },
     orderBy: { createdAt: 'desc' },
-    take: 50,
-  });
+    take: 200,
+    include: { town: { select: { name: true } }, dropoffTown: { select: { name: true } }, promo: { select: { id: true, title: true } } },
+  })).filter((j) => jobs.canTake(rider, j)).slice(0, 50);
   const here = rider.lastLat !== null ? { lat: rider.lastLat, lng: rider.lastLng } : null;
   const list = rows.map((j) => ({
     id: j.id, code: j.code, vehicleType: j.vehicleType,
+    townId: j.townId, townName: j.town?.name || null,
+    dropoffTownId: j.dropoffTownId || j.townId, dropoffTownName: (j.dropoffTown || j.town)?.name || null,
     pickupBarangay: j.pickupBarangay, pickupAddress: j.pickupAddress, pickupName: j.pickupName,
     dropoffBarangay: j.dropoffBarangay, dropoffAddress: j.dropoffAddress,
     packageSize: j.packageSize, packageDetails: j.packageDetails,
     distanceKm: Number(j.distanceKm), riderEarning: Number(j.riderEarning), fee: Number(j.fee),
     feePaidBy: j.feePaidBy, codAmount: Number(j.codAmount), createdAt: j.createdAt,
     source: j.source, externalCode: j.externalCode,
+    // A free delivery: the buyer pays nothing, MoorMove pays riderEarning.
+    promo: j.promo ? { id: j.promo.id, title: j.promo.title } : null, listFee: j.listFee === null ? null : Number(j.listFee),
     pickup: { lat: j.pickupLat, lng: j.pickupLng }, dropoff: { lat: j.dropoffLat, lng: j.dropoffLng },
     awayKm: here ? Math.round(haversineKm(here, { lat: j.pickupLat, lng: j.pickupLng }) * 1.3 * 10) / 10 : null,
   }));
@@ -243,7 +305,8 @@ router.post('/jobs/:id/accept', async (req, res) => {
   if (!rider.isOnline) throw new ApiError('Go online to take deliveries', 409);
   if (await activeJob(rider.id)) throw new ApiError('Finish your current delivery first', 409);
   const job = await prisma.job.findUnique({ where: { id: String(req.params.id) }, include: jobs.jobInclude });
-  if (!job || job.townId !== rider.townId || !jobs.canTake(rider, job)) throw new ApiError('Delivery not found', 404);
+  if (!job || !jobs.fitsVehicle(rider, job)) throw new ApiError('Delivery not found', 404);
+  if (!jobs.canTake(rider, job)) throw new ApiError('This delivery is outside your area', 409);
   const updated = await jobs.move(job, {
     from: ['SEARCHING'],
     to: 'ACCEPTED',
@@ -351,6 +414,11 @@ router.get('/jobs', async (req, res) => {
     where: { riderId: rider.id, ...HISTORY[tab] },
     orderBy: { updatedAt: 'desc' },
     take: 100,
+    include: {
+      town: { select: { id: true, name: true } },
+      dropoffTown: { select: { id: true, name: true } },
+      promo: { select: { id: true, title: true } },
+    },
   });
   res.json({
     success: true,
@@ -359,6 +427,10 @@ router.get('/jobs', async (req, res) => {
       pickupBarangay: j.pickupBarangay, dropoffBarangay: j.dropoffBarangay,
       riderEarning: Number(j.riderEarning), codAmount: Number(j.codAmount), distanceKm: Number(j.distanceKm),
       rating: j.rating, deliveredAt: j.deliveredAt, updatedAt: j.updatedAt,
+      // Free-delivery promo, the usual fare, and the towns (for 'Calapan City → Baco').
+      promo: j.promo || null, listFee: j.listFee === null ? null : Number(j.listFee),
+      townId: j.townId, townName: j.town?.name || null,
+      dropoffTownId: j.dropoffTownId || j.townId, dropoffTownName: j.dropoffTown?.name || j.town?.name || null,
     })),
   });
 });
@@ -406,6 +478,7 @@ router.get('/earnings', async (req, res) => {
     select: { id: true, code: true, platformCut: true, deliveredAt: true },
     orderBy: { deliveredAt: 'desc' },
   });
+  const balance = promos.balance(owedRows.reduce((sum, j) => sum + Number(j.platformCut), 0));
   const settlements = await prisma.settlement.findMany({
     where: { riderId: rider.id },
     orderBy: { createdAt: 'desc' },
@@ -416,7 +489,10 @@ router.get('/earnings', async (req, res) => {
     where: delivered,
     orderBy: { deliveredAt: 'desc' },
     take: 15,
-    select: { id: true, code: true, pickupBarangay: true, dropoffBarangay: true, riderEarning: true, fee: true, platformCut: true, deliveredAt: true },
+    select: {
+      id: true, code: true, pickupBarangay: true, dropoffBarangay: true, riderEarning: true, fee: true, listFee: true, platformCut: true, deliveredAt: true,
+      promo: { select: { id: true, title: true } },
+    },
   });
   res.json({
     success: true,
@@ -426,10 +502,16 @@ router.get('/earnings', async (req, res) => {
       month: await sum(monthStart),
       all: await sum(null),
       days: days.map(({ date, earnings, deliveries }) => ({ date, earnings: Math.round(earnings * 100) / 100, deliveries })),
-      owed: Math.round(owedRows.reduce((s, j) => s + Number(j.platformCut), 0) * 100) / 100,
+      // Signed: positive, the rider owes MoorMove; negative, MoorMove owes the
+      // rider (free deliveries). owedDirection: RIDER_OWES | MOORMOVE_OWES | SETTLED.
+      owed: balance.owed,
+      owedDirection: balance.direction,
+      moormoveOwes: balance.direction === 'MOORMOVE_OWES' ? balance.amount : 0,
       owedJobs: owedRows.length,
       settlements: settlements.map((s) => ({ ...s, amount: Number(s.amount) })),
-      recent: recent.map((j) => ({ ...j, riderEarning: Number(j.riderEarning), fee: Number(j.fee), platformCut: Number(j.platformCut) })),
+      recent: recent.map((j) => ({
+        ...j, riderEarning: Number(j.riderEarning), fee: Number(j.fee), listFee: j.listFee === null ? null : Number(j.listFee), platformCut: Number(j.platformCut),
+      })),
     },
   });
 });

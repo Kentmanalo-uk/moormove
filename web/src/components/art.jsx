@@ -2,7 +2,7 @@ import { useId } from 'react';
 import {
   Bell, CheckCircle, Package, Truck, MapPin, MapTrifold, Receipt, ChartBar, Coins, TrendUp,
   CalendarBlank, MagnifyingGlass, ChatCircleDots, Star, Heart, UsersThree, IdentificationCard, AddressBook,
-  Moped, ClockCountdown, WifiSlash, Moon, Images, Camera, Wallet, ShieldCheck, Storefront, House, NavigationArrow, Key,
+  Moped, ClockCountdown, WifiSlash, Moon, Images, Camera, Wallet, ShieldCheck, Storefront, House, NavigationArrow, Key, Gift, Tag, MapPinArea,
 } from '@phosphor-icons/react';
 
 /*
@@ -276,6 +276,8 @@ const SCENES = {
   help: { layout: 'bubbles', main: ChatCircleDots, a: ShieldCheck },
   shop: { layout: 'card', main: Storefront, a: Package },
   security: { layout: 'card', main: ShieldCheck, a: Key },
+  promos: { layout: 'card', main: Gift, a: Tag },
+  area: { layout: 'map', main: MapPinArea, a: House },
 };
 
 /** The glass picture for an empty state. `size` is its height. */

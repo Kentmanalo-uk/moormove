@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { useLive } from '../../lib/hooks';
 import { dateTime, peso, plural } from '../../lib/format';
-import { DeliveryCard } from '../../components/delivery';
+import { DeliveryCard, isFree, townHop } from '../../components/delivery';
 import { Empty, Loading, PageHead, StatStrip } from '../../components/ui';
 
 const TABS = [['completed', 'Delivered'], ['other', 'Cancelled & failed']];
@@ -36,7 +36,7 @@ export default function RiderHistory() {
         <div className="card-grid">
           {data.map((j) => (
             <DeliveryCard key={j.id} job={j} to={`/rider/jobs/${j.id}`}
-              money={j.status === 'DELIVERED' ? `+${peso(j.riderEarning)}` : '—'} extra={`${j.externalCode ? `E-MOORM #${j.externalCode} · ` : ''}${dateTime(j.deliveredAt || j.updatedAt)}`} />
+              money={j.status === 'DELIVERED' ? `+${peso(j.riderEarning)}` : '—'} extra={`${isFree(j) ? 'Free delivery, paid by MoorMove · ' : ''}${townHop(j) ? `${townHop(j).join(' → ')} · ` : ''}${j.externalCode ? `E-MOORM #${j.externalCode} · ` : ''}${dateTime(j.deliveredAt || j.updatedAt)}`} />
           ))}
         </div>
       )}

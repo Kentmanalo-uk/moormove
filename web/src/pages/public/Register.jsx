@@ -50,8 +50,8 @@ export default function Register() {
   };
 
   return (
-    <AuthLayout vehicle={role === 'RIDER' ? 'TRICYCLE' : 'MOTORCYCLE'}>
-      <h1>{customersWelcome ? 'Create your account' : 'Ride with MoorMove'}</h1>
+    <AuthLayout other={{ to: '/login', label: 'Log in' }}>
+      <h1 className="auth__title">{customersWelcome ? 'Sign Up' : 'Ride with MoorMove'}</h1>
       <p className="auth__lead">{customersWelcome ? 'What would you like to do?' : 'Deliver E-MOORM orders in your own town and earn.'}</p>
       {customersWelcome && (
         <div className="role-pick" role="radiogroup" aria-label="I want to">
@@ -91,7 +91,7 @@ export default function Register() {
           <span className="small">I agree to MoorMove&apos;s <Link to="/info/terms">Terms</Link> and <Link to="/info/privacy">Privacy Policy</Link>.</span>
         </label>
         {error && <p className="alert" role="alert" style={{ marginTop: 12 }}>{error}</p>}
-        <button className="btn btn--primary btn--block btn--lg btn--shadow" style={{ marginTop: 14 }} disabled={busy}>
+        <button className="btn btn--primary btn--block btn--lg auth__submit" style={{ marginTop: 14 }} disabled={busy}>
           {busy ? 'Creating…' : role === 'RIDER' ? 'Sign up as a rider' : 'Sign up'}
         </button>
       </form>

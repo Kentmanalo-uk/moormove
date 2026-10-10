@@ -110,7 +110,7 @@ export default function AdminSettings() {
           {num('maxDistanceKm', 'Longest delivery (km)')}
           {num('maxCod', 'Most COD a rider carries', null, '₱')}
           <label className="toggle-row">
-            <span><strong>Taking bookings</strong><small className="muted">Turn off to pause all new bookings</small></span>
+            <span className="toggle-row__text"><strong>Taking bookings</strong><small className="muted">Turn off to pause all new bookings</small></span>
             <span className="switch"><input type="checkbox" checked={Boolean(form.bookingOpen)} onChange={(e) => setForm({ ...form, bookingOpen: e.target.checked })} /><span /></span>
           </label>
         </div>
@@ -120,11 +120,11 @@ export default function AdminSettings() {
         <div className="section__head"><h2>E-MOORM</h2></div>
         <div className="section__body">
           <label className="toggle-row">
-            <span><strong>Take E-MOORM deliveries</strong><small className="muted">E-MOORM shops call a MoorMove rider when an order is packed</small></span>
+            <span className="toggle-row__text"><strong>Take E-MOORM deliveries</strong><small className="muted">E-MOORM shops call a MoorMove rider when an order is packed</small></span>
             <span className="switch"><input type="checkbox" checked={Boolean(form.partnerOpen)} onChange={(e) => setForm({ ...form, partnerOpen: e.target.checked })} /><span /></span>
           </label>
           <label className="toggle-row">
-            <span><strong>Let people book deliveries on MoorMove</strong><small className="muted">Off: MoorMove carries E-MOORM orders only, and sign-up is for riders</small></span>
+            <span className="toggle-row__text"><strong>Let people book deliveries on MoorMove</strong><small className="muted">Off: MoorMove carries E-MOORM orders only, and sign-up is for riders</small></span>
             <span className="switch"><input type="checkbox" checked={Boolean(form.publicBooking)} onChange={(e) => setForm({ ...form, publicBooking: e.target.checked })} /><span /></span>
           </label>
           <PartnerHealth />

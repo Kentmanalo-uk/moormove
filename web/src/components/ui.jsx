@@ -1,6 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Bicycle, Camera, CheckCircle, Image as ImageIcon, Moped, Star } from '@phosphor-icons/react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  ArrowLeft, Bicycle, Camera, CaretLeft, CheckCircle, DotsThree, Image as ImageIcon, Moped, Star,
+} from '@phosphor-icons/react';
+import { useShell } from './shellContext';
+import { useAuth } from '../auth';
 import api from '../api';
 import { initials, JOB_STATUS, RIDER_STATUS } from '../lib/format';
 import { EmptyArt } from './art';
@@ -39,18 +43,84 @@ export function VehicleIcon({ type, size = 24, ...rest }) {
   return <Icon size={size} weight="duotone" {...rest} />;
 }
 
-/** Tab pages: big title, round buttons on the right. */
-export function PageHead({ title, children }) {
+/**
+ * Phones: the ⋯ at the right end of a page's top bar. It lists this page's own
+ * actions (`extra`: { label, icon, to | onClick }) and then every place of the
+ * signed-in area, so nothing is out of reach on a phone. Desktop: hidden
+ * (the sidebar has the places).
+ */
+export function PageMenu({ extra = [], className = '' }) {
+  const area = useShell();
+  const { user } = useAuth() || {};
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (!box.current?.contains(e.target)) setOpen(false); };
+    const esc = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('pointerdown', away);
+    window.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  useEffect(() => setOpen(false), [pathname]);
+  const outside = user
+    ? [['/', 'Back to MoorMove', null], ['/info/help', 'Help center', null]]
+    : [['/welcome', 'MoorMove home', null], ['/info/help', 'Help center', null], ['/login', 'Log in', null]];
+  const places = (area ? area.groups.flatMap(([, list]) => list) : outside).filter(([to]) => to !== pathname);
+  const items = [...extra.filter(Boolean), ...places.map(([to, label, icon]) => ({ to, label, icon }))];
+  if (!items.length) return null;
   return (
-    <header className="page-head">
-      <h1>{title}</h1>
-      {children && <div className="page-head__actions">{children}</div>}
+    <div className={`page-menu ${className}`.trim()} ref={box}>
+      <button type="button" className="bar-icon page-menu__btn" aria-label="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <DotsThree size={26} weight="bold" />
+      </button>
+      {open && (
+        <div className="page-menu__list" role="menu">
+          {items.map(({ to, label, icon: Icon, onClick }) => {
+            const inner = <>{Icon ? <Icon size={20} /> : <span className="page-menu__gap" />}<span>{label}</span></>;
+            return to
+              ? <Link key={label} to={to} role="menuitem" onClick={() => setOpen(false)}>{inner}</Link>
+              : <button key={label} type="button" role="menuitem" onClick={() => { setOpen(false); onClick(); }}>{inner}</button>;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tab pages. Desktop: E-MOORM's page header (title, a line under it, the
+ * main action on the right). Phones: a white top bar with the title, plain
+ * icon buttons and ⋯. `brand` shows MoorMove's logo and that line instead
+ * of the title on phones (home tabs, like E-MOORM's admin and seller homes).
+ */
+export function PageHead({ title, sub, brand, children, menu = [] }) {
+  return (
+    <header className={`page-head${brand ? ' page-head--brand' : ''}`}>
+      {brand && (
+        <span className="page-head__brand">
+          <img src="/icon.svg" alt="" />
+          <span><strong>MoorMove</strong><small>{brand}</small></span>
+        </span>
+      )}
+      <div className="page-head__title">
+        <h1>{title}</h1>
+        {sub && <p>{sub}</p>}
+      </div>
+      <div className="page-head__actions">
+        {children}
+        <PageMenu extra={menu} />
+      </div>
     </header>
   );
 }
 
-/** Other pages: back button and title. */
-export function BackBar({ title, to, children }) {
+/** Other pages: back, title and ⋯ (phones); back button and title (desktop). */
+export function BackBar({ title, to, children, menu = [] }) {
   const navigate = useNavigate();
   const back = () => {
     if (to) navigate(to);
@@ -59,9 +129,12 @@ export function BackBar({ title, to, children }) {
   };
   return (
     <div className="back-bar">
-      <button type="button" className="round-btn round-btn--soft" onClick={back} aria-label="Back"><ArrowLeft size={20} /></button>
+      <button type="button" className="bar-icon back-bar__back" onClick={back} aria-label="Back"><CaretLeft size={24} weight="bold" className="only-phone" /><ArrowLeft size={20} className="only-desk" /></button>
       <h1>{title}</h1>
-      {children && <div className="back-bar__end">{children}</div>}
+      <div className="back-bar__end">
+        {children}
+        <PageMenu extra={menu} />
+      </div>
     </div>
   );
 }
@@ -143,6 +216,7 @@ export function MapPage({ map, title, back, actions, lead, overlay, compactMap =
         {lead && <span className="map-page__float-actions">{lead}</span>}
         <span className="map-page__spacer" />
         {actions && <span className="map-page__float-actions">{actions}</span>}
+        <PageMenu className="page-menu--float" />
       </div>
       <div className="map-page__map">
         {map}

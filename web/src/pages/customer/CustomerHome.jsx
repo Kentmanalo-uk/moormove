@@ -4,7 +4,7 @@ import { useAuth } from '../../auth';
 import { useInfo, useLive } from '../../lib/hooks';
 import { dateTime, peso, SIZES, VEHICLES } from '../../lib/format';
 import { DeliveryCard } from '../../components/delivery';
-import { Avatar, Empty } from '../../components/ui';
+import { Empty, PageHead } from '../../components/ui';
 import { VehicleArt } from '../../components/art';
 
 const greeting = () => {
@@ -30,19 +30,13 @@ export default function CustomerHome() {
 
   return (
     <>
-      <header className="home-head">
-        <Link to="/profile" className="home-head__me">
-          <Avatar name={user.fullName} size="sm" />
-          <span><small>{greeting()},</small><strong>{user.fullName.split(' ')[0]}</strong></span>
+      <PageHead title={`${greeting()}, ${user.fullName.split(' ')[0]}`} brand="Deliveries">
+        <Link to="/info/help" className="round-btn only-phone" aria-label="Help"><Question size={22} /></Link>
+        <Link to="/notifications" className="round-btn only-phone" aria-label="Notifications">
+          <Bell size={22} />
+          {unread > 0 && <b className="badge">{unread}</b>}
         </Link>
-        <div className="page-head__actions home-head__actions">
-          <Link to="/info/help" className="round-btn" aria-label="Help"><Question size={22} /></Link>
-          <Link to="/notifications" className="round-btn" aria-label="Notifications">
-            <Bell size={22} />
-            {unread > 0 && <b className="badge">{unread}</b>}
-          </Link>
-        </div>
-      </header>
+      </PageHead>
 
       <div className="home-layout">
         <div className="home-layout__main">

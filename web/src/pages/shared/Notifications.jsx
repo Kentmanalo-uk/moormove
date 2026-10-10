@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Bell, Checks, IdentificationCard, Package, Star, Wallet } from '@phosphor-icons/react';
+import { Bell, Checks, Gift, IdentificationCard, Package, Star, Wallet } from '@phosphor-icons/react';
 import api from '../../api';
 import { useAuth } from '../../auth';
 import { useLive } from '../../lib/hooks';
@@ -11,6 +11,8 @@ const KINDS = {
   rider: { icon: IdentificationCard, tone: 'blue' },
   cash: { icon: Wallet, tone: 'amber' },
   star: { icon: Star, tone: 'amber' },
+  // Free-delivery promos running where the rider works.
+  promo: { icon: Gift, tone: 'pink' },
 };
 
 const dayOf = (d) => {

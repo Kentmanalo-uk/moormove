@@ -8,6 +8,7 @@ import './styles/base.css';
 import './styles/shell.css';
 import './styles/maps.css';
 import './styles/pages.css';
+import './styles/phone.css';
 import './styles/motion.css';
 
 createRoot(document.getElementById('root')).render(

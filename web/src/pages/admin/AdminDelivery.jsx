@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Phone, Storefront } from '@phosphor-icons/react';
+import { CheckCircle, Phone, Storefront } from '@phosphor-icons/react';
 import api from '../../api';
 import { useLive } from '../../lib/hooks';
 import { ACTIVE, ago, dateTime, JOB_STATUS, peso } from '../../lib/format';
 import { RouteMap } from '../../components/maps';
-import { MoneyBlock, OrderBadge, orderPayText, Progress, RiderCard, RouteBlock, StatusBlock, Timeline } from '../../components/delivery';
+import {
+  FreeChip, isFree, MoneyBlock, OrderBadge, orderPayText, Progress, RiderCard, RouteBlock, StatusBlock, Timeline, TownHop,
+} from '../../components/delivery';
 import { Avatar, BackBar, Empty, Field, JobPill, Loading, MapPage, PhotoGrid, Sheet, Stars, useToast } from '../../components/ui';
 
 function AssignRider({ job, onAssigned }) {
@@ -26,6 +28,9 @@ function AssignRider({ job, onAssigned }) {
   return (
     <section className="section">
       <div className="section__head"><h2>Give it to a rider</h2></div>
+      {riders?.length > 0 && (
+        <p className="section__body muted small assign-note">Riders whose area covers both the pickup and the drop-off come first. You can still give it to one outside their area.</p>
+      )}
       {!riders ? <Loading /> : !riders.length ? (
         <Empty compact art="riders" title="No free riders">
           {job.source === 'EMOORM'
@@ -34,13 +39,22 @@ function AssignRider({ job, onAssigned }) {
         </Empty>
       ) : (
         <ul className="rows">
-          {riders.map((r) => (
-            <li key={r.id} className="row">
+          {riders.map((r, i) => (
+            <li key={r.id} className={`row assign-row${r.coversArea ? '' : ' assign-row--out'}${!r.coversArea && (i === 0 || riders[i - 1].coversArea) ? ' assign-row--first-out' : ''}`}>
               <span className="table__avatar">
                 <Avatar name={r.name} size="sm" />
                 <span className={`presence presence--badge${r.isOnline ? ' presence--on' : ''}`} aria-label={r.isOnline ? 'Online' : 'Offline'} />
               </span>
-              <span className="row__text">{r.name}<small>{r.plateNumber || '—'} · {r.barangay || ''} · {r.isOnline ? 'online' : `seen ${ago(r.lastSeenAt) || 'never'}`}</small></span>
+              <span className="row__text">
+                <span className="assign-row__name">
+                  {r.name}
+                  {r.coversArea
+                    ? <span className="pill pill--green"><CheckCircle size={12} weight="fill" /> Covers this area</span>
+                    : <span className="pill pill--amber">Outside their area</span>}
+                </span>
+                <small>{r.plateNumber || '—'} · {r.isOnline ? 'online' : `seen ${ago(r.lastSeenAt) || 'never'}`}</small>
+                {r.areasSummary && <small>Area: {r.areasSummary}</small>}
+              </span>
               <a className="round-btn round-btn--grey" href={`tel:${r.phone}`} aria-label={`Call ${r.name}`}><Phone size={18} weight="fill" /></a>
               <button type="button" className="btn btn--soft btn--sm" onClick={() => assign(r)} disabled={Boolean(busy)}>{busy === r.id ? '…' : 'Assign'}</button>
             </li>
@@ -82,6 +96,8 @@ export default function AdminDelivery() {
     <MapPage title={job.code} back="/admin/deliveries" actions={<JobPill status={job.status} />}
       map={<RouteMap fill pickup={job.pickup} dropoff={job.dropoff} rider={riderPos} searching={job.status === 'SEARCHING'} />}>
           {order && <OrderBadge job={job} />}
+          {isFree(job) && <FreeChip job={job} line admin />}
+          <TownHop job={job} />
           <section className="card status-card">
             <StatusBlock status={job.status} title={JOB_STATUS[job.status].label}
               text={`${job.town.name} · booked ${dateTime(job.createdAt)}${job.cancelReason ? ` · ${job.cancelReason}` : ''}${job.failReason ? ` · ${job.failReason}` : ''}`} />
@@ -116,9 +132,10 @@ export default function AdminDelivery() {
             <div className="section__body">
               <MoneyBlock job={job} />
               {order && <p className="small muted order-pay">For the rider: {orderPayText(job)}</p>}
-              <div className="kv"><dt>MoorMove commission</dt><dd>{peso(job.platformCut, { cents: true })}</dd></div>
+              {/* Free deliveries: the fare and what MoorMove pays the rider are in the receipt above. */}
+              {job.platformCut >= 0 && <div className="kv"><dt>MoorMove commission</dt><dd>{peso(job.platformCut, { cents: true })}</dd></div>}
               <div className="kv"><dt>Rider earns</dt><dd>{peso(job.riderEarning, { cents: true })}</dd></div>
-              {job.status === 'DELIVERED' && <div className="kv"><dt>Commission paid</dt><dd>{job.settlementId ? 'Yes' : 'Not yet'}</dd></div>}
+              {job.status === 'DELIVERED' && <div className="kv"><dt>{job.platformCut < 0 ? 'Rider paid by MoorMove' : 'Commission paid'}</dt><dd>{job.settlementId ? 'Yes' : 'Not yet'}</dd></div>}
               {job.codAmount > 0 && job.status === 'DELIVERED' && <div className="kv"><dt>{order ? 'COD back to the shop' : 'COD back to sender'}</dt><dd>{job.codReturnedAt ? `Confirmed ${dateTime(job.codReturnedAt)}` : 'Not confirmed yet'}</dd></div>}
             </div>
           </section>

@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { MagnifyingGlass, Plus } from '@phosphor-icons/react';
+import { Gift, MagnifyingGlass, Plus } from '@phosphor-icons/react';
 import { useLive } from '../../lib/hooks';
 import { ago, peso, VEHICLES } from '../../lib/format';
-import { DeliveryCard, MiniRoute } from '../../components/delivery';
+import { DeliveryCard, MiniRoute, TownHop, townHop } from '../../components/delivery';
 import { Empty, JobPill, Loading, PageHead, VehicleIcon } from '../../components/ui';
+
+// A free-delivery promo job: no fare for the buyer. (The list rows carry
+// promo/listFee when the API sends them; otherwise a fare of 0 means free.)
+const free = (j) => Boolean(j.promo) || Number(j.fee) === 0;
 
 const SOURCES = [['', 'All sources'], ['EMOORM', 'E-MOORM orders'], ['MOORMOVE', 'Booked on MoorMove']];
 const TABS = [['searching', 'Finding rider'], ['active', 'On the way'], ['delivered', 'Delivered'], ['problems', 'Cancelled & failed'], ['all', 'All']];
@@ -65,10 +69,15 @@ export default function AdminDeliveries() {
                       </Link>
                     </td>
                     <td><MiniRoute from={j.pickupBarangay} to={j.dropoffBarangay} /></td>
-                    <td>{j.town}</td>
+                    <td>{townHop(j) ? <TownHop job={j} /> : j.town}</td>
                     <td>{j.riderName || <span className="muted">—</span>}</td>
                     <td><JobPill status={j.status} /></td>
-                    <td className="table__num"><b>{peso(j.fee)}</b>{j.codAmount > 0 && <small className="tone-amber">COD {peso(j.codAmount)}</small>}</td>
+                    <td className="table__num">
+                      {free(j)
+                        ? <><b className="tone-pink free-fare"><Gift size={14} weight="fill" /> Free</b>{j.listFee ? <small className="muted">usually {peso(j.listFee)}</small> : null}</>
+                        : <b>{peso(j.fee)}</b>}
+                      {j.codAmount > 0 && <small className="tone-amber">COD {peso(j.codAmount)}</small>}
+                    </td>
                     <td className="muted">{ago(j.createdAt)}</td>
                   </tr>
                 ))}
@@ -77,8 +86,8 @@ export default function AdminDeliveries() {
           </div>
           <div className="card-grid only-narrow">
             {data.jobs.map((j) => (
-              <DeliveryCard key={j.id} job={j} to={`/admin/deliveries/${j.id}`} money={peso(j.fee)}
-                extra={`${j.code}${j.externalCode ? ` · E-MOORM #${j.externalCode}` : ''} · ${j.riderName || ago(j.createdAt)}`} />
+              <DeliveryCard key={j.id} job={j} to={`/admin/deliveries/${j.id}`} money={free(j) ? <span className="tone-pink">Free</span> : peso(j.fee)}
+                extra={`${j.code}${j.externalCode ? ` · E-MOORM #${j.externalCode}` : ''}${townHop(j) ? ` · ${townHop(j).join(' → ')}` : ''} · ${j.riderName || ago(j.createdAt)}`} />
             ))}
           </div>
         </>

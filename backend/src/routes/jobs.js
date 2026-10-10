@@ -12,6 +12,8 @@ const { ApiError } = require('../middleware/errors');
 const { text } = require('../lib/check');
 const { notify } = require('../lib/notify');
 const jobs = require('../lib/jobs');
+const areas = require('../lib/areas');
+const promos = require('../lib/promos');
 
 const router = express.Router();
 router.use(authenticate);
@@ -46,12 +48,12 @@ router.get('/rules', async (req, res) => {
   });
 });
 
-/** How many riders are online in a town right now, per vehicle. Counts only. */
+/** How many riders who deliver in a town are online right now, per vehicle. Counts only. */
 router.get('/riders-online', async (req, res) => {
   const townId = String(req.query.townId || '');
   const rows = await prisma.rider.groupBy({
     by: ['vehicleType'],
-    where: { status: 'APPROVED', isOnline: true, ...(townId ? { townId } : {}) },
+    where: { status: 'APPROVED', isOnline: true, ...(townId ? areas.inTownWhere(townId) : {}) },
     _count: { _all: true },
   });
   const counts = { TRICYCLE: 0, MOTORCYCLE: 0, BICYCLE: 0 };
@@ -59,24 +61,33 @@ router.get('/riders-online', async (req, res) => {
   res.json({ success: true, data: { ...counts, total: counts.TRICYCLE + counts.MOTORCYCLE + counts.BICYCLE } });
 });
 
-/** What a delivery would cost (the price shown before booking). */
+/**
+ * What a delivery would cost (the price shown before booking). With the
+ * pickup's townId, a free-delivery promo running there makes it fee 0, with
+ * listFee (the usual fee) and promo { id, title, endsAt }.
+ */
 router.post('/quote', async (req, res) => {
   await customersWelcome(req);
-  const { vehicleType, packageSize, pickup, dropoff } = req.body || {};
+  const { vehicleType, packageSize, pickup, dropoff, townId } = req.body || {};
   if (!jobs.VEHICLES.includes(vehicleType) || !jobs.SIZES.includes(packageSize) || !isPoint(pickup) || !isPoint(dropoff)) {
     throw new ApiError('Drop both pins and choose a vehicle and size', 422);
   }
   const s = await settingsLib.get();
-  const price = quote(s, {
+  // By road (an ESTIMATE when the route service is out).
+  const price = await quote(s, {
     vehicleType, packageSize,
     pickup: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
     dropoff: { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
   });
+  const promo = await promos.applicable({ townId: townId ? String(townId) : null, distanceKm: price.distanceKm });
   res.json({
     success: true,
     data: {
       distanceKm: price.distanceKm,
-      fee: price.fee,
+      distanceSource: price.distanceSource,
+      fee: promo ? 0 : price.fee,
+      listFee: price.fee,
+      promo: promos.brief(promo),
       breakdown: price.breakdown,
       fits: carries(vehicleType, packageSize),
       tooFar: price.distanceKm > s.maxDistanceKm,
@@ -117,6 +128,8 @@ router.get('/', allow('CUSTOMER'), async (req, res) => {
         pickupBarangay: j.pickupBarangay, dropoffBarangay: j.dropoffBarangay,
         pickupAddress: j.pickupAddress, dropoffAddress: j.dropoffAddress, dropoffName: j.dropoffName,
         packageDetails: j.packageDetails, fee: Number(j.fee), codAmount: Number(j.codAmount),
+        // Free under a promo: fee 0, listFee the usual fee.
+        listFee: j.listFee === null ? null : Number(j.listFee), promoId: j.promoId,
         riderName: j.rider?.user?.fullName || null, rating: j.rating,
         createdAt: j.createdAt, deliveredAt: j.deliveredAt,
       })),

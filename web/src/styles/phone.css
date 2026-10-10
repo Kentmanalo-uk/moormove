@@ -1,0 +1,73 @@
+/*
+ * Phones (≤768px): E-MOORM's app look (its styles/phone-app.css).
+ * 1. Each page has a solid white top bar with a hairline under it (shell.css).
+ * 2. Sections run the full screen width instead of sitting as rounded cards
+ *    on grey, split by 8px grey bands; list rows by hairlines.
+ * 3. Lists of things (deliveries, offers, towns) stay white cards on the grey,
+ *    like E-MOORM's order cards.
+ * Desktop: cards are E-MOORM's admin cards (12px corners, a soft shadow).
+ */
+
+@media (min-width: 769px) {
+  .cx .section:not(.section--plain), .cx .card, .cx .stat-strip, .cx .table-wrap, .cx .profile-hero, .cx .kpis,
+  .cx .apply-hero, .cx .earn-panel, .cx .earn-hero, .cx .cash-hero, .cx .town-card, .cx .dcard, .cx .apply-progress, .cx .empty:not(.empty--compact) {
+    box-shadow: var(--elev-card);
+  }
+  .cx .section .card, .cx .card .card, .cx .section .dcard { box-shadow: none; }
+}
+
+@media (max-width: 768px) {
+  /* 2. Full-width sections. */
+  :is(.cx-content, .app__main) :is(
+    .section:not(.section--plain), .card, .stat-strip, .table-wrap, .profile-hero, .apply-hero, .earn-panel, .earn-hero,
+    .cash-hero, .online-strip, .info-hero, .apply-progress, .book-panel, .vehicles, .kpis, .empty:not(.empty--compact)
+  ) {
+    margin-left: -12px; margin-right: -12px; border-radius: 0; box-shadow: none;
+  }
+  /* …but not inside another section. */
+  :is(.section, .card, .profile-hero) :is(.section, .card, .stat-strip, .empty) { margin-left: 0; margin-right: 0; }
+  .section .card, .card .card { border-radius: var(--radius-sm); }
+
+  /* 8px bands between them. */
+  .card + .card, .card + .section, .section + .card, .section + .section, .section--plain + .card,
+  .section--plain + .section:not(.section--plain), .profile-hero + .section, .profile-hero + .stat-strip,
+  .stat-strip + .section, .kpis + .section, .admin-row, .admin-split, .admin-split + .section, .admin-row + .section { margin-top: 8px; }
+  .page-grid, .grid-2, .admin-split, .settings-grid { gap: 8px; }
+  .page-grid > div > * + * { margin-top: 8px; }
+  .stack { gap: 8px; }
+  .map-page__panel > * + * { margin-top: 8px; }
+  .map-page__panel { padding-top: 8px; }
+
+  /* Grids that zero their items' margins. */
+  .settings-grid > .section, .admin-split > .live-card, .grid-2 > .section, .grid-2 > .card { margin-left: -12px !important; margin-right: -12px !important; border-radius: 0; }
+  .live-card__map { margin: 0 12px 12px; }
+
+  /* Headings inside sections: E-MOORM's regular 18px. */
+  .section__head { padding: 16px 16px 8px; }
+  .section__head h2, .card-title { font-size: 1.15rem; font-weight: 400; }
+  .section__head a, .section__head .link-btn { color: var(--ink-3); font-weight: 400; }
+
+  /* Things on the grey between sections. */
+  .list-tools { padding-top: 10px; }
+  .section--plain { padding-top: 6px; }
+  .section--plain:not(:first-child) { margin-top: 10px !important; }
+  .section--plain + .card, .section--plain + .section:not(.section--plain) { margin-top: 10px; }
+  .notif-group { margin-top: 0; }
+  .notif-group__title { margin: 14px 4px 8px; }
+  .alert, .note { margin-top: 8px; }
+
+  /* Rows: hairlines, readable size. */
+  .row { min-height: 52px; padding: 12px 16px; border-top-color: var(--line); }
+  .row__icon--ink { color: var(--ink); }
+
+  /* Empty states fill their band. */
+  .empty { min-height: 300px; }
+
+  /* Bigger tap targets. */
+  .tab { min-height: 40px; }
+  .btn--sm { min-height: 40px; }
+  .chip-btn { min-height: 40px; }
+  .link-btn { min-height: 40px; }
+  .icon-btn { width: 44px; height: 44px; }
+  .switch { width: 52px; height: 30px; }
+}

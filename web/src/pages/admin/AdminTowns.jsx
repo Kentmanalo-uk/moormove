@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ArrowsClockwise, MapPin } from '@phosphor-icons/react';
+import { Link } from 'react-router-dom';
+import { ArrowsClockwise, CaretRight, MapPin, UsersThree } from '@phosphor-icons/react';
 import api from '../../api';
 import { useLive } from '../../lib/hooks';
 import { dateTime } from '../../lib/format';
@@ -36,6 +37,7 @@ export default function AdminTowns() {
   return (
     <>
       <BackBar title="Towns" to="/admin/me">
+        <Link to="/admin/coverage" className="btn btn--soft btn--sm only-desk"><UsersThree size={16} /> Rider coverage</Link>
         <button type="button" className="btn btn--soft btn--sm" onClick={sync} disabled={busy}>
           <ArrowsClockwise size={16} /> {busy ? 'Updating…' : 'Update from E-MOORM'}
         </button>
@@ -43,6 +45,11 @@ export default function AdminTowns() {
       <p className="muted small" style={{ margin: '0 4px 12px' }}>
         The list comes from E-MOORM&apos;s public town list (read only). Switch a town off to stop new bookings there.
       </p>
+      <Link to="/admin/coverage" className="area-link only-phone towns-coverage">
+        <UsersThree size={24} weight="fill" />
+        <span><strong>Rider coverage</strong><small>Approved and online riders in each town</small></span>
+        <CaretRight size={18} />
+      </Link>
       {error ? <p className="alert">{error}</p> : !data ? <Loading /> : !data.length ? (
         <Empty art="towns" title="No towns yet" action={<button type="button" className="btn btn--primary" onClick={sync} disabled={busy}>Copy towns from E-MOORM</button>}>
           Copy the towns so riders and customers can choose them.
@@ -54,7 +61,7 @@ export default function AdminTowns() {
               <span className="town-card__icon"><MapPin size={22} weight="fill" /></span>
               <span className="row__text">
                 <strong>{t.name}</strong>{!t.isActive && <span className="pill pill--grey">No longer on E-MOORM</span>}
-                <small>{t.riders} riders · {t.delivered} delivered</small>
+                <small><Link to={`/admin/riders?status=APPROVED&townId=${t.id}`}>{t.riders} {t.riders === 1 ? 'rider' : 'riders'}</Link> · {t.ridersOnline} online · {t.delivered} delivered</small>
                 <small>{t.serviceOpen ? 'Taking bookings' : 'Closed'} · updated {dateTime(t.syncedAt)}</small>
               </span>
               <label className="switch" aria-label={`Bookings in ${t.name}`}>

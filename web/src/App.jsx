@@ -19,6 +19,7 @@ import RiderJob from './pages/rider/RiderJob';
 import RiderHistory from './pages/rider/RiderHistory';
 import Earnings from './pages/rider/Earnings';
 import Apply from './pages/rider/Apply';
+import RiderArea from './pages/rider/RiderArea';
 import AdminHome from './pages/admin/AdminHome';
 import AdminDeliveries from './pages/admin/AdminDeliveries';
 import AdminDelivery from './pages/admin/AdminDelivery';
@@ -31,6 +32,9 @@ import AdminCash from './pages/admin/AdminCash';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminTowns from './pages/admin/AdminTowns';
 import AdminMe from './pages/admin/AdminMe';
+import AdminRiderArea from './pages/admin/AdminRiderArea';
+import AdminCoverage from './pages/admin/AdminCoverage';
+import AdminPromos from './pages/admin/AdminPromos';
 
 const HOME = { ADMIN: '/admin', RIDER: '/rider', CUSTOMER: '/home' };
 
@@ -84,6 +88,7 @@ export default function App() {
         <Route path="/rider/earnings" element={<Earnings />} />
         <Route path="/rider/jobs/:id" element={<RiderJob />} />
         <Route path="/rider/apply" element={<Apply />} />
+        <Route path="/rider/area" element={<RiderArea />} />
       </Route>
 
       <Route path="/admin" element={<Only roles={['ADMIN']}><AdminShell /></Only>}>
@@ -93,6 +98,9 @@ export default function App() {
         <Route path="deliveries/:id" element={<AdminDelivery />} />
         <Route path="riders" element={<AdminRiders />} />
         <Route path="riders/:id" element={<AdminRider />} />
+        <Route path="riders/:id/area" element={<AdminRiderArea />} />
+        <Route path="coverage" element={<AdminCoverage />} />
+        <Route path="promos" element={<AdminPromos />} />
         <Route path="customers" element={<AdminCustomers />} />
         <Route path="customers/:id" element={<AdminCustomer />} />
         <Route path="cash" element={<AdminCash />} />

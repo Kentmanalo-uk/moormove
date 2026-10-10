@@ -9,6 +9,8 @@ const { inProvince, isPoint } = require('./geo');
 const { notify, notifyAdmins } = require('./notify');
 const { ApiError } = require('../middleware/errors');
 const { text, phone, isPhone, failIf } = require('./check');
+const areas = require('./areas');
+const promos = require('./promos');
 
 const ACTIVE = ['ACCEPTED', 'AT_PICKUP', 'PICKED_UP', 'AT_DROPOFF'];
 const OPEN = ['SEARCHING', ...ACTIVE];
@@ -67,32 +69,48 @@ const readBooking = (body, settings) => {
 };
 
 /**
- * Who may take a job: riders with the same vehicle; for E-MOORM orders, any
- * vehicle that carries the package (the fare was set with the cheapest one).
+ * Whose vehicle fits a job: riders with the same vehicle; for E-MOORM orders,
+ * any vehicle that carries the package (the fare was set with the cheapest one).
  */
-const canTake = (rider, job) => rider.vehicleType === job.vehicleType
+const fitsVehicle = (rider, job) => rider.vehicleType === job.vehicleType
   || (job.source === 'EMOORM' && carries(rider.vehicleType, job.packageSize));
 
-/** The same rule as a query: the open jobs a rider could take. */
+/** The vehicles that fit a job. */
+const vehiclesFor = (job) => VEHICLES.filter((v) => fitsVehicle({ vehicleType: v }, job));
+
+/**
+ * Who may take a job: the vehicle fits, and both its pickup and its drop-off
+ * are in the rider's area (`rider.areas` loaded; see lib/areas.js).
+ */
+const canTake = (rider, job) => fitsVehicle(rider, job) && areas.coversJob(rider, job);
+
+/**
+ * The same rule as a query, as far as a query can tell: open jobs for the
+ * rider's vehicle with both ends in the rider's towns. Check each with
+ * canTake for the barangays.
+ */
 const takeableBy = (rider) => ({
-  OR: [
-    { vehicleType: rider.vehicleType },
-    { source: 'EMOORM', packageSize: { in: settingsLib.CARRIES[rider.vehicleType] || [] } },
+  AND: [
+    {
+      OR: [
+        { vehicleType: rider.vehicleType },
+        { source: 'EMOORM', packageSize: { in: settingsLib.CARRIES[rider.vehicleType] || [] } },
+      ],
+    },
+    areas.jobsNearWhere(rider),
   ],
 });
 
-/** Tell the online riders who could take a new job (and are free) about it. */
+/** Tell the online riders who could take a new job (free, and it is in their area) about it. */
 const alertRiders = async (job) => {
-  const vehicles = job.source === 'EMOORM'
-    ? VEHICLES.filter((v) => carries(v, job.packageSize))
-    : [job.vehicleType];
-  const riders = await prisma.rider.findMany({
-    where: { townId: job.townId, status: 'APPROVED', isOnline: true, vehicleType: { in: vehicles }, jobs: { none: { status: { in: ACTIVE } } } },
-    select: { userId: true },
+  const riders = await areas.ridersCovering(areas.jobPlaces(job), {
+    where: { status: 'APPROVED', isOnline: true, vehicleType: { in: vehiclesFor(job) }, jobs: { none: { status: { in: ACTIVE } } } },
   });
   await notify(riders.map((r) => r.userId), {
     kind: 'job',
-    title: `New delivery · ₱${Number(job.riderEarning).toFixed(0)}`,
+    title: job.promoId
+      ? `Free delivery · you earn ₱${Number(job.riderEarning).toFixed(0)} (paid by MoorMove)`
+      : `New delivery · ₱${Number(job.riderEarning).toFixed(0)}`,
     body: `${job.externalCode ? `E-MOORM order #${job.externalCode}: ` : ''}${job.pickupBarangay} → ${job.dropoffBarangay}, ${num(job.distanceKm)} km`,
     link: `/rider/jobs/${job.id}`,
   });
@@ -107,13 +125,19 @@ const createJob = async ({ body, createdById, customerId }) => {
   if (!town) throw new ApiError('Choose a town from the list', 422, { townId: 'Choose a town from the list' });
   if (!town.serviceOpen) throw new ApiError(`MoorMove isn't open in ${town.name} yet`, 422, { townId: 'Not open yet' });
 
-  const price = quote(settings, b);
+  // By road from pickup to drop-off (an ESTIMATE when the route service is out).
+  const price = await quote(settings, b);
   if (price.distanceKm > settings.maxDistanceKm) {
     throw new ApiError(`That's ${price.distanceKm} km. MoorMove delivers up to ${settings.maxDistanceKm} km.`, 422, { 'dropoff.pin': 'Too far' });
   }
   if (price.distanceKm < 0.05) {
     throw new ApiError('Pickup and drop-off are at the same spot', 422, { 'dropoff.pin': 'Move the pin' });
   }
+  // A free-delivery promo: the customer pays nothing, MoorMove pays the rider.
+  const promo = await promos.applicable({ townId: town.id, distanceKm: price.distanceKm });
+  const money = promo
+    ? { ...promos.freeMoney(price.fee, settings), promoId: promo.id }
+    : { fee: price.fee, platformCut: price.platformCut, riderEarning: price.riderEarning };
 
   let job;
   for (let attempt = 0; !job; attempt += 1) {
@@ -124,6 +148,8 @@ const createJob = async ({ body, createdById, customerId }) => {
           customerId: customerId || null,
           createdById,
           townId: town.id,
+          // Booked on MoorMove: both pins are in the chosen town.
+          dropoffTownId: town.id,
           vehicleType: b.vehicleType,
           pickupName: b.pickup.name,
           pickupPhone: b.pickup.phone,
@@ -142,9 +168,8 @@ const createJob = async ({ body, createdById, customerId }) => {
           packageSize: b.packageSize,
           packageDetails: b.packageDetails,
           distanceKm: price.distanceKm,
-          fee: price.fee,
-          platformCut: price.platformCut,
-          riderEarning: price.riderEarning,
+          distanceSource: price.distanceSource,
+          ...money,
           feePaidBy: b.feePaidBy,
           codAmount: b.codAmount,
           events: { create: { status: 'SEARCHING', actorId: createdById, note: 'Booked' } },
@@ -185,6 +210,8 @@ const riderSummary = async (rider) => {
 
 const jobInclude = {
   town: { select: { id: true, name: true } },
+  dropoffTown: { select: { id: true, name: true } },
+  promo: { select: { id: true, title: true } },
   rider: { include: { user: { select: { fullName: true, phone: true } } } },
   customer: { select: { id: true, fullName: true, phone: true, email: true } },
   events: { orderBy: { createdAt: 'asc' }, select: { status: true, note: true, createdAt: true } },
@@ -206,6 +233,8 @@ const jobView = async (job, viewer) => {
     source: job.source,
     externalCode: job.externalCode,
     town: job.town,
+    // The drop-off's town (older jobs: the pickup's).
+    dropoffTown: job.dropoffTown || job.town,
     vehicleType: job.vehicleType,
     pickup: {
       name: job.pickupName, phone: preview ? null : job.pickupPhone, address: job.pickupAddress,
@@ -218,8 +247,13 @@ const jobView = async (job, viewer) => {
     packageSize: job.packageSize,
     packageDetails: job.packageDetails,
     distanceKm: num(job.distanceKm),
+    // ROAD (by road) or ESTIMATE (the route service was out); null: an older job.
+    distanceSource: job.distanceSource || null,
     fee: num(job.fee),
     feePaidBy: job.feePaidBy,
+    // A free-delivery promo: fee 0, listFee the usual fee.
+    promo: job.promo ? { id: job.promo.id, title: job.promo.title } : null,
+    listFee: num(job.listFee),
     codAmount: num(job.codAmount),
     codReturnedAt: job.codReturnedAt,
     pickupPhotoId: preview ? null : job.pickupPhotoId,
@@ -244,6 +278,8 @@ const jobView = async (job, viewer) => {
   if (isAdmin || isMyDelivery || viewer.role === 'RIDER') {
     view.riderEarning = num(job.riderEarning);
     view.platformCut = num(job.platformCut);
+    // A free delivery: MoorMove pays the rider's earning (platformCut is minus it).
+    view.moormovePays = num(job.platformCut) < 0 ? -num(job.platformCut) : 0;
   }
   if (isAdmin) {
     view.customer = job.customer;
@@ -257,9 +293,10 @@ const findForViewer = async (id, viewer) => {
   const job = await prisma.job.findUnique({ where: { id: String(id) }, include: jobInclude });
   if (!job) throw new ApiError('Delivery not found', 404);
   if (viewer.role === 'ADMIN' || job.customerId === viewer.id || job.rider?.userId === viewer.id) return job;
+  // Riders see open jobs in their area.
   if (viewer.role === 'RIDER' && job.status === 'SEARCHING') {
-    const rider = await prisma.rider.findUnique({ where: { userId: viewer.id } });
-    if (rider?.status === 'APPROVED' && rider.townId === job.townId) return job;
+    const rider = await prisma.rider.findUnique({ where: { userId: viewer.id }, include: { areas: true } });
+    if (rider?.status === 'APPROVED' && areas.coversJob(rider, job)) return job;
   }
   throw new ApiError('Delivery not found', 404);
 };
@@ -298,5 +335,5 @@ const failAlert = (job, reason) => notifyAdmins({
 module.exports = {
   ACTIVE, OPEN, DONE, VEHICLES, SIZES,
   createJob, jobView, findForViewer, move, jobInclude, riderSummary, tellCustomer, failAlert, num,
-  canTake, takeableBy, alertRiders, newCode,
+  canTake, fitsVehicle, vehiclesFor, takeableBy, alertRiders, newCode,
 };

@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, CheckCircle, Coins, MapPin, Package, WarningCircle } from '@phosphor-icons/react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Camera, CheckCircle, Coins, Gift, MapPin, MapPinArea, Package, WarningCircle } from '@phosphor-icons/react';
 import api from '../../api';
 import { useLive, useShareLocation } from '../../lib/hooks';
 import { ACTIVE, dateTime, JOB_STATUS, km, peso, SIZES } from '../../lib/format';
 import { RouteMap } from '../../components/maps';
 import {
-  buyerPays, MoneyBlock, OrderBadge, orderPayText, Progress, RouteBlock, StatusBlock, Timeline,
+  buyerPays, FreeChip, isFree, moormovePays, MoneyBlock, OrderBadge, orderPayText, Progress, RouteBlock, StatusBlock, Timeline, TownHop,
 } from '../../components/delivery';
 import { BackBar, Field, Loading, MapPage, PhotoField, PhotoGrid, Sheet, Stars, useToast } from '../../components/ui';
 
@@ -28,7 +28,9 @@ function StepPanel({ job, onDone, position }) {
   const [cod, setCod] = useState(false);
   const [busy, setBusy] = useState(false);
   const atPickupSide = ['ACCEPTED', 'AT_PICKUP'].includes(job.status);
-  const collectFee = (atPickupSide && job.feePaidBy === 'SENDER') || (!atPickupSide && job.feePaidBy === 'RECIPIENT');
+  // A free delivery has no fare to collect: MoorMove pays the rider.
+  const free = isFree(job);
+  const collectFee = !free && job.fee > 0 && ((atPickupSide && job.feePaidBy === 'SENDER') || (!atPickupSide && job.feePaidBy === 'RECIPIENT'));
   const needsCod = job.status === 'AT_DROPOFF' && job.codAmount > 0;
   const order = job.source === 'EMOORM';
   // What the rider ticks at delivery: on E-MOORM orders, everything the buyer pays.
@@ -62,6 +64,12 @@ function StepPanel({ job, onDone, position }) {
         <div className="collect">
           <Coins size={22} weight="fill" />
           <div><p>{orderPayText(job)}</p></div>
+        </div>
+      )}
+      {!order && free && (
+        <div className="collect collect--free">
+          <Gift size={22} weight="fill" />
+          <div><p>Free delivery: collect no fare. MoorMove pays your <strong>{peso(moormovePays(job))}</strong>.</p></div>
         </div>
       )}
       {!order && (collectFee || needsCod) && (
@@ -101,6 +109,7 @@ export default function RiderJob() {
   const [problem, setProblem] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [outside, setOutside] = useState('');
 
   if (error) return <><BackBar title="Delivery" /><p className="alert">{error}</p></>;
   if (!job) return <><BackBar title="Delivery" /><Loading /></>;
@@ -111,6 +120,10 @@ export default function RiderJob() {
       setData(await api.post(`/rider/jobs/${job.id}/accept`));
       toast('Delivery accepted. Head to the pickup.');
     } catch (err) {
+      if (err.status === 409 && /outside your area/i.test(err.message)) {
+        setOutside(err.message);
+        return;
+      }
       toast(err.message);
       if (err.status === 409 || err.status === 404) navigate('/rider', { replace: true });
     } finally {
@@ -148,8 +161,17 @@ export default function RiderJob() {
           <OrderBadge job={job} className="pill--white" />
           <span>You earn</span>
           <strong>{peso(job.riderEarning)}</strong>
-          <small>{km(job.distanceKm)} · {SIZES[job.packageSize].label} package{job.codAmount > 0 ? ` · COD ${peso(job.codAmount)}` : ''}</small>
+          <small>{km(job.distanceKm)} · {SIZES[job.packageSize].label} package{job.codAmount > 0 ? ` · ${isFree(job) ? 'collect only' : 'COD'} ${peso(job.codAmount)}` : ''}</small>
+          <TownHop job={job} className="earn-hero__hop" />
+          <FreeChip job={job} line />
         </section>
+        {outside && (
+          <div className="alert alert--warn outside-alert" role="alert">
+            <MapPinArea size={20} weight="fill" />
+            <span><b>{outside}.</b> You only get deliveries whose pickup and drop-off are both in your area.</span>
+            <Link to="/rider/area" className="btn btn--soft btn--sm">Change area</Link>
+          </div>
+        )}
         <section className="section">
           <div className="section__head"><h2>Route</h2></div>
           <div className="section__body"><RouteBlock job={job} /></div>
@@ -160,7 +182,7 @@ export default function RiderJob() {
         </section>
         <div className="sticky-action">
           {job.status === 'SEARCHING'
-            ? <><button type="button" className="btn btn--grey btn--lg" onClick={() => navigate('/rider')} disabled={busy}>Skip</button><button type="button" className="btn btn--primary btn--lg" onClick={accept} disabled={busy}>{busy ? 'Accepting…' : `Accept · ${peso(job.riderEarning)}`}</button></>
+            ? <><button type="button" className="btn btn--grey btn--lg" onClick={() => navigate('/rider')} disabled={busy}>Skip</button><button type="button" className="btn btn--primary btn--lg" onClick={accept} disabled={busy || Boolean(outside)}>{busy ? 'Accepting…' : outside ? 'Outside your area' : `Accept · ${peso(job.riderEarning)}`}</button></>
             : <p className="alert alert--warn">This delivery was taken by another rider.</p>}
         </div>
       </MapPage>
@@ -177,6 +199,8 @@ export default function RiderJob() {
     <MapPage title={job.code} back="/rider" compactMap={done}
       map={<RouteMap fill pickup={job.pickup} dropoff={job.dropoff} me={active ? position : null} />}>
       {order && <OrderBadge job={job} />}
+      {isFree(job) && <FreeChip job={job} line />}
+      <TownHop job={job} />
 
       {active && (
         <section className="card status-card">
