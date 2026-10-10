@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Camera, CheckCircle, Clock, CurrencyCircleDollar, MapPin, MapPinLine, Money, Moped, NavigationArrow,
-  Package, ShieldCheck, Storefront, UsersThree,
+  ArrowRight, Camera, CheckCircle, CurrencyCircleDollar, MapPin, MapPinLine, Money, Moped, NavigationArrow,
+  Package, ShieldCheck, UsersThree,
 } from '@phosphor-icons/react';
 import { useInfo } from '../../lib/hooks';
 import { peso } from '../../lib/format';
 import { Brand } from '../../components/ui';
-import { EmptyArt, HeroArt, VehicleArt } from '../../components/art';
+import { CleanHeroArt, EmptyArt, HeroArt, VehicleArt } from '../../components/art';
 
 const STEPS = [
   ['places', 'Drop two pins', 'Where to pick up and where to deliver, anywhere in your town. You see the fare before you book.'],
@@ -34,38 +34,20 @@ const RIDER_PERKS = [
   'Paid in cash, right away, by the customer',
 ];
 
-/* ── While MoorMove carries E-MOORM orders only: a page for riders ───── */
+/* ── While MoorMove carries E-MOORM orders only: a short page for riders ── */
 
 const RIDER_STEPS = [
-  ['applications', 'Sign up and apply', 'Tell us your town and vehicle, and add photos of your ID and papers. MoorMove checks every rider.'],
-  ['offers', 'Go online, accept a delivery', 'E-MOORM shops in your town call a rider when an order is packed. You see the pay before you accept.'],
-  ['deliveries', 'Pick up and deliver', 'From the shop to the buyer, with a photo at pickup and at delivery. Cash on delivery goes back to the shop.'],
-];
-
-const CARRY = [
-  ['BICYCLE', 'Bike / e-bike', 'Small parcels'],
-  ['MOTORCYCLE', 'Motorcycle', 'Small and medium parcels'],
-  ['TRICYCLE', 'Tricycle', 'Every size, up to large'],
-];
-
-const RIDER_WHY = [
-  [Clock, '#3b82f6', 'Your own hours', "Go online when you want to work, offline when you don't."],
-  [MapPinLine, '#059669', 'Your own town', 'Deliveries near you, nearest pickups first.'],
-  [Storefront, '#ec4899', 'Local shops', 'Orders from E-MOORM shops in Oriental Mindoro.'],
-  [CurrencyCircleDollar, '#f59e0b', 'Paid in cash', 'The delivery fee is yours, minus a small MoorMove commission.'],
+  ['Sign up and apply', 'Your town, your vehicle, photos of your ID and papers.'],
+  ['Go online', 'Shops near you call a rider when an order is packed.'],
+  ['Deliver', 'Pick up at the shop, bring it to the buyer, get paid in cash.'],
 ];
 
 function RiderWelcome() {
   return (
-    <div className="landing">
+    <div className="landing landing--mini">
       <header className="landing__nav">
         <div className="landing__inner">
           <Brand />
-          <nav className="landing__links" aria-label="Sections">
-            <a href="#how">How it works</a>
-            <a href="#rides">Vehicles</a>
-            <Link to="/info/help">Help</Link>
-          </nav>
           <div className="landing__auth">
             <Link to="/login" className="btn btn--ghost btn--sm">Log in</Link>
             <Link to="/register?as=rider" className="btn btn--primary btn--sm">Sign up</Link>
@@ -73,87 +55,43 @@ function RiderWelcome() {
         </div>
       </header>
 
-      <section className="landing-hero">
-        <div className="landing__inner landing-hero__grid">
-          <div className="landing-hero__text">
-            <span className="eyebrow"><Moped size={16} weight="fill" /> For riders in Oriental Mindoro</span>
-            <h1>Ride with MoorMove, <span>deliver for shops in your own town</span></h1>
-            <p>MoorMove riders bring E-MOORM orders from local shops to their buyers with a tricycle, motorcycle or bike. Go online when you want and earn on every delivery.</p>
-            <div className="landing-hero__cta">
-              <Link to="/register?as=rider" className="btn btn--primary btn--lg btn--shadow"><Moped size={20} weight="fill" /> Sign up to ride</Link>
+      <main className="mini-hero">
+        <div className="landing__inner mini-hero__grid">
+          <div className="mini-hero__art"><CleanHeroArt vehicle="MOTORCYCLE" /></div>
+          <div className="mini-hero__text">
+            <h1>Deliver for shops <span>in your own town.</span></h1>
+            <p>Bring E-MOORM orders from local shops to their buyers, on your own hours, with a tricycle, motorcycle or bike.</p>
+            <div className="mini-hero__cta">
+              <Link to="/register?as=rider" className="btn btn--primary btn--lg">Sign up to ride</Link>
               <Link to="/login" className="btn btn--white btn--lg">Log in</Link>
             </div>
-            <ul className="landing-hero__chips">
-              <li><Clock size={18} weight="fill" /> Your own hours</li>
-              <li><NavigationArrow size={18} weight="fill" /> Nearest first</li>
-              <li><Money size={18} weight="fill" /> Paid in cash</li>
-            </ul>
           </div>
-          <div className="landing-hero__art"><HeroArt vehicle="TRICYCLE" /></div>
         </div>
-      </section>
+      </main>
 
-      <section id="how" className="landing-sec">
+      <section className="mini-steps" aria-label="How it works">
         <div className="landing__inner">
-          <h2 className="landing-sec__title">How it works</h2>
-          <p className="landing-sec__sub">From sign-up to your first delivery.</p>
-          <ol className="how-grid">
-            {RIDER_STEPS.map(([art, title, text], i) => (
-              <li key={title} className="how-card">
-                <span className="how-card__n">{i + 1}</span>
-                <EmptyArt name={art} size={84} />
-                <h3>{title}</h3>
-                <p>{text}</p>
+          <ol>
+            {RIDER_STEPS.map(([title, text], i) => (
+              <li key={title}>
+                <span className="mini-steps__n">{i + 1}</span>
+                <div>
+                  <h3>{title}</h3>
+                  <p>{text}</p>
+                </div>
               </li>
             ))}
           </ol>
         </div>
       </section>
 
-      <section id="rides" className="landing-sec landing-sec--white">
+      <footer className="mini-foot">
         <div className="landing__inner">
-          <h2 className="landing-sec__title">Ride what you have</h2>
-          <p className="landing-sec__sub">You see the deliveries your vehicle can carry.</p>
-          <div className="ride-cards">
-            {CARRY.map(([type, name, fits]) => (
-              <div key={type} className="ride-card">
-                <div className="ride-card__art"><VehicleArt type={type} size={190} /></div>
-                <h3>{name}</h3>
-                <div className="ride-card__foot"><span className="pill pill--green">{fits}</span></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-sec">
-        <div className="landing__inner">
-          <h2 className="landing-sec__title">Why ride with MoorMove</h2>
-          <div className="why-grid">
-            {RIDER_WHY.map(([Icon, color, title, text]) => (
-              <div key={title} className="why-card">
-                <Icon size={30} weight="fill" style={{ color }} />
-                <h3>{title}</h3>
-                <p>{text}</p>
-              </div>
-            ))}
-          </div>
-          <p className="landing-safe"><ShieldCheck size={22} weight="fill" /> Your ID and papers are seen only by MoorMove&apos;s team.</p>
-        </div>
-      </section>
-
-      <footer className="landing-foot">
-        <div className="landing__inner landing-foot__inner">
-          <div>
-            <Brand />
-            <p>Local delivery by the E-MOORM team, for Oriental Mindoro.</p>
-          </div>
+          <span>MoorMove · by E-MOORM, Oriental Mindoro</span>
           <nav aria-label="More">
             <Link to="/info/help">Help</Link>
             <Link to="/info/terms">Terms</Link>
             <Link to="/info/privacy">Privacy</Link>
-            <Link to="/info/about">About</Link>
-            <Link to="/login">Log in</Link>
           </nav>
         </div>
       </footer>

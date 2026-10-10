@@ -724,3 +724,40 @@ a.stat-strip__item:hover { background: #fafafa; }
 @media (min-width: 1000px) {
   .list-tools .select-sm { margin: 0; flex-shrink: 0; }
 }
+
+/* ── The riders' landing page: minimal (one screen, three short steps) ── */
+.landing--mini { display: flex; flex-direction: column; }
+.landing--mini .landing__nav { position: static; background: #fff; backdrop-filter: none; border-bottom: 0; }
+.landing--mini .landing__auth { margin-left: auto; }
+.mini-hero { flex: 1; display: flex; align-items: center; padding: 8px 0 12px; }
+.mini-hero__grid { display: grid; gap: 4px; align-items: center; width: 100%; }
+.mini-hero__art { width: 100%; max-width: 300px; margin: 0 auto; }
+.mini-hero h1 { font-size: 2.15rem; font-weight: 700; letter-spacing: -0.035em; line-height: 1.08; margin: 0 0 12px; }
+.mini-hero h1 span { color: var(--green); }
+.mini-hero p { color: var(--ink-3); font-size: 1.02rem; line-height: 1.55; max-width: 440px; }
+.mini-hero__cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.mini-hero__cta .btn { flex: 1 1 150px; }
+.mini-hero__cta .btn--white { border-color: var(--line); }
+.mini-steps { padding: 12px 0 36px; }
+.mini-steps ol { display: grid; gap: 16px; padding-top: 24px; border-top: 1px solid var(--line-2); }
+.mini-steps li { display: flex; gap: 12px; align-items: flex-start; }
+.mini-steps__n {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--green-50); color: var(--green-dark); font-size: 0.88rem; font-weight: 700;
+}
+.mini-steps h3 { font-size: 1rem; font-weight: 600; margin-top: 3px; }
+.mini-steps p { color: var(--ink-3); font-size: 0.92rem; margin-top: 2px; }
+.mini-foot { padding: 18px 0 28px; color: var(--ink-3); font-size: 0.86rem; }
+.mini-foot .landing__inner { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 20px; }
+.mini-foot nav { display: flex; gap: 18px; }
+.mini-foot a { color: var(--ink-3); }
+.mini-foot a:hover { color: var(--ink); }
+@media (min-width: 900px) {
+  .mini-hero { padding: 40px 0 24px; }
+  .mini-hero__grid { grid-template-columns: 1fr 1fr; gap: 56px; }
+  .mini-hero__text { order: -1; }
+  .mini-hero__art { max-width: 460px; }
+  .mini-hero h1 { font-size: 3.4rem; }
+  .mini-hero__cta .btn { flex: 0 0 auto; }
+  .mini-steps ol { grid-template-columns: repeat(3, 1fr); gap: 32px; }
+}

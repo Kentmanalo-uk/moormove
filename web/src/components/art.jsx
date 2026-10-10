@@ -222,6 +222,31 @@ export function HeroArt({ className = '', vehicle = 'MOTORCYCLE' }) {
   );
 }
 
+/**
+ * The landing page's picture, kept simple: the rider on a soft green circle,
+ * a dotted route ahead to the drop-off pin. No glass, blur or sparkles.
+ */
+export function CleanHeroArt({ className = '', vehicle = 'MOTORCYCLE' }) {
+  const id = useArtId('ch');
+  const url = (part) => `url(#${id}-${part})`;
+  return (
+    <svg viewBox="0 0 360 280" className={`hero-art ${className}`.trim()} aria-hidden="true" focusable="false">
+      <Defs id={id} />
+      <circle cx="180" cy="140" r="122" fill="#ecfdf5" />
+
+      {/* The route, from the rider to the drop-off. */}
+      <path d="M226 228C262 228 292 204 286 128" fill="none" stroke={G.g500} strokeWidth="4" strokeLinecap="round" strokeDasharray="0.5 11" />
+      <ellipse cx="286" cy="124" rx="11" ry="3.5" fill={G.g800} opacity="0.14" />
+      <path d="M286 122C273 107 266 98 266 86A20 20 0 1 1 306 86C306 98 299 107 286 122Z" fill={url('pink')} />
+      <circle cx="286" cy="85" r="7.5" fill="#ffffff" />
+
+      {/* The rider. */}
+      <ellipse cx="132" cy="252" rx="84" ry="6" fill={G.g800} opacity="0.1" />
+      <g transform="translate(44 152) scale(1.1)">{drawVehicle(vehicle, url)}</g>
+    </svg>
+  );
+}
+
 /* ── Empty states ──────────────────────────────────────────────────────── */
 
 const SCENES = {
