@@ -1,0 +1,15 @@
+{
+  "name": "moormove",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MoorMove (move.emoorm.shop): one Node app that serves the API and the built web app.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm install --prefix backend --omit=dev && npm install --prefix web --include=dev && npm run build --prefix web && npm run db:generate --prefix backend",
+    "start": "node server.js",
+    "dev:api": "npm run dev --prefix backend",
+    "dev:web": "npm run dev --prefix web"
+  }
+}

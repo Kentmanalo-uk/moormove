@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+# Riders' documents and photos (IDs, licences): never in git.
+backend/uploads/

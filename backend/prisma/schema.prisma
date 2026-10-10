@@ -1,0 +1,364 @@
+// MoorMove's own database (moormove_db). Nothing here points at E-MOORM's
+// database: what MoorMove knows about E-MOORM comes through E-MOORM's API.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  RIDER
+  /// Books deliveries.
+  CUSTOMER
+}
+
+/// A MoorMove account: customers, riders and MoorMove's own admins.
+/// Separate from E-MOORM's accounts.
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name") @db.VarChar(120)
+  phone        String    @db.VarChar(20)
+  role         UserRole  @default(CUSTOMER)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  rider          Rider?         @relation("RiderUser")
+  reviewedRiders Rider[]        @relation("RiderReviewer")
+  uploads        Upload[]
+  bookedJobs     Job[]          @relation("JobCustomer")
+  createdJobs    Job[]          @relation("JobCreator")
+  jobEvents      JobEvent[]
+  notifications  Notification[]
+  settlementsMade Settlement[]  @relation("SettlementAdmin")
+
+  @@index([role, createdAt])
+  @@map("users")
+}
+
+/// A town. Copied from E-MOORM's municipalities through its API (the id is
+/// E-MOORM's), so E-MOORM orders match up later.
+model Town {
+  id          String   @id
+  name        String   @unique
+  code        String   @unique
+  /// Still listed by E-MOORM.
+  isActive    Boolean  @default(true) @map("is_active")
+  /// MoorMove takes bookings here (the admin's switch).
+  serviceOpen Boolean  @default(true) @map("service_open")
+  syncedAt    DateTime @map("synced_at")
+
+  riders Rider[]
+  jobs   Job[]
+
+  @@map("towns")
+}
+
+enum RiderStatus {
+  /// Still filling in the application.
+  DRAFT
+  /// Sent, waiting for an admin.
+  PENDING
+  /// The admin asked for changes (see reviewNote); the rider can send it again.
+  NEEDS_CHANGES
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum VehicleType {
+  TRICYCLE
+  MOTORCYCLE
+  BICYCLE
+}
+
+/// A rider's application and, once approved, their working profile.
+model Rider {
+  id     String      @id @default(uuid())
+  userId String      @unique @map("user_id")
+  user   User        @relation("RiderUser", fields: [userId], references: [id], onDelete: Cascade)
+  status RiderStatus @default(DRAFT)
+
+  // Where they work
+  townId   String? @map("town_id")
+  town     Town?   @relation(fields: [townId], references: [id])
+  barangay String? @db.VarChar(80)
+
+  // Vehicle
+  vehicleType   VehicleType? @map("vehicle_type")
+  plateNumber   String?      @map("plate_number") @db.VarChar(20)
+  /// Tricycles: their TODA and franchise (MTOP) number.
+  todaName      String?      @map("toda_name") @db.VarChar(120)
+  mtopNumber    String?      @map("mtop_number") @db.VarChar(40)
+  licenseNumber String?      @map("license_number") @db.VarChar(40)
+
+  // Documents: ids of Upload rows (private files, shown only to the rider
+  // and admins).
+  selfieUploadId  String? @map("selfie_upload_id")
+  idUploadId      String? @map("id_upload_id")
+  licenseUploadId String? @map("license_upload_id")
+  orcrUploadId    String? @map("orcr_upload_id")
+  vehicleUploadId String? @map("vehicle_upload_id")
+
+  emergencyName  String? @map("emergency_name") @db.VarChar(120)
+  emergencyPhone String? @map("emergency_phone") @db.VarChar(20)
+
+  // Review
+  submittedAt  DateTime? @map("submitted_at")
+  reviewedAt   DateTime? @map("reviewed_at")
+  reviewedById String?   @map("reviewed_by_id")
+  reviewedBy   User?     @relation("RiderReviewer", fields: [reviewedById], references: [id])
+  reviewNote   String?   @map("review_note") @db.Text
+
+  // Working
+  isOnline   Boolean   @default(false) @map("is_online")
+  lastLat    Float?    @map("last_lat")
+  lastLng    Float?    @map("last_lng")
+  lastSeenAt DateTime? @map("last_seen_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  jobs        Job[]
+  settlements Settlement[]
+
+  @@index([status, submittedAt])
+  @@index([townId, status])
+  @@index([townId, status, isOnline])
+  @@map("riders")
+}
+
+/// A photo someone uploaded (documents, proof of pickup and delivery). Kept
+/// outside the public web folder and served only to the people who may see it.
+model Upload {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName  String   @unique @map("file_name")
+  mimeType  String   @map("mime_type") @db.VarChar(40)
+  size      Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("uploads")
+}
+
+enum JobStatus {
+  /// Waiting for a rider to accept.
+  SEARCHING
+  ACCEPTED
+  AT_PICKUP
+  PICKED_UP
+  AT_DROPOFF
+  DELIVERED
+  CANCELLED
+  /// Picked up but could not be delivered (reason in failReason).
+  FAILED
+}
+
+enum PackageSize {
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+enum FeePayer {
+  /// The sender pays the rider at pickup.
+  SENDER
+  /// The recipient pays the rider at drop-off.
+  RECIPIENT
+}
+
+/// Where a delivery came from.
+enum JobSource {
+  /// Booked on MoorMove (by a customer or an admin).
+  MOORMOVE
+  /// An E-MOORM order the shop sent to MoorMove's riders.
+  EMOORM
+}
+
+/// A delivery: from a pickup point to a drop-off point in one town.
+model Job {
+  id     String    @id @default(uuid())
+  code   String    @unique @db.VarChar(12)
+  status JobStatus @default(SEARCHING)
+
+  source       JobSource @default(MOORMOVE)
+  /// E-MOORM's order id and order number (E-MOORM jobs only).
+  externalRef  String?   @map("external_ref") @db.VarChar(64)
+  externalCode String?   @map("external_code") @db.VarChar(40)
+  /// The order id while the job is still open, so one order has at most one
+  /// open job; cleared when it is delivered, cancelled or fails.
+  openRef      String?   @unique @map("open_ref") @db.VarChar(64)
+
+  /// Who booked it (null: booked by an admin for someone who called in).
+  customerId  String? @map("customer_id")
+  customer    User?   @relation("JobCustomer", fields: [customerId], references: [id])
+  createdById String  @map("created_by_id")
+  createdBy   User    @relation("JobCreator", fields: [createdById], references: [id])
+
+  townId      String      @map("town_id")
+  town        Town        @relation(fields: [townId], references: [id])
+  vehicleType VehicleType @map("vehicle_type")
+
+  pickupName     String  @map("pickup_name") @db.VarChar(120)
+  pickupPhone    String  @map("pickup_phone") @db.VarChar(20)
+  pickupAddress  String  @map("pickup_address") @db.VarChar(255)
+  pickupBarangay String  @map("pickup_barangay") @db.VarChar(80)
+  pickupLat      Float   @map("pickup_lat")
+  pickupLng      Float   @map("pickup_lng")
+  pickupNotes    String? @map("pickup_notes") @db.VarChar(255)
+
+  dropoffName     String  @map("dropoff_name") @db.VarChar(120)
+  dropoffPhone    String  @map("dropoff_phone") @db.VarChar(20)
+  dropoffAddress  String  @map("dropoff_address") @db.VarChar(255)
+  dropoffBarangay String  @map("dropoff_barangay") @db.VarChar(80)
+  dropoffLat      Float   @map("dropoff_lat")
+  dropoffLng      Float   @map("dropoff_lng")
+  dropoffNotes    String? @map("dropoff_notes") @db.VarChar(255)
+
+  packageSize    PackageSize @map("package_size")
+  packageDetails String      @map("package_details") @db.VarChar(255)
+
+  // Money, fixed when booked
+  distanceKm   Decimal  @map("distance_km") @db.Decimal(6, 2)
+  fee          Decimal  @db.Decimal(10, 2)
+  /// MoorMove's commission out of the fee; the rest is the rider's.
+  platformCut  Decimal  @map("platform_cut") @db.Decimal(10, 2)
+  riderEarning Decimal  @map("rider_earning") @db.Decimal(10, 2)
+  feePaidBy    FeePayer @default(SENDER) @map("fee_paid_by")
+  /// Item price the rider collects from the recipient and brings back to
+  /// the sender (0: none).
+  codAmount     Decimal   @default(0) @map("cod_amount") @db.Decimal(10, 2)
+  /// The sender confirmed getting the COD money from the rider.
+  codReturnedAt DateTime? @map("cod_returned_at")
+
+  riderId String? @map("rider_id")
+  rider   Rider?  @relation(fields: [riderId], references: [id])
+
+  pickupPhotoId   String? @map("pickup_photo_id")
+  deliveryPhotoId String? @map("delivery_photo_id")
+
+  acceptedAt       DateTime? @map("accepted_at")
+  arrivedPickupAt  DateTime? @map("arrived_pickup_at")
+  pickedUpAt       DateTime? @map("picked_up_at")
+  arrivedDropoffAt DateTime? @map("arrived_dropoff_at")
+  deliveredAt      DateTime? @map("delivered_at")
+  cancelledAt      DateTime? @map("cancelled_at")
+  cancelReason     String?   @map("cancel_reason") @db.VarChar(255)
+  failedAt         DateTime? @map("failed_at")
+  failReason       String?   @map("fail_reason") @db.VarChar(255)
+
+  // The customer's rating of the rider
+  rating        Int?      @db.TinyInt
+  ratingComment String?   @map("rating_comment") @db.VarChar(500)
+  ratedAt       DateTime? @map("rated_at")
+
+  /// The settlement in which the rider paid MoorMove's commission.
+  settlementId String?     @map("settlement_id")
+  settlement   Settlement? @relation(fields: [settlementId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  events        JobEvent[]
+  partnerEvents PartnerEvent[]
+
+  @@index([status, townId, vehicleType, createdAt])
+  @@index([externalRef])
+  @@index([customerId, createdAt])
+  @@index([riderId, status])
+  @@index([createdAt])
+  @@map("jobs")
+}
+
+/// Every step of a delivery: who did it, when, and where they were.
+model JobEvent {
+  id        String    @id @default(uuid())
+  jobId     String    @map("job_id")
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status    JobStatus
+  actorId   String?   @map("actor_id")
+  actor     User?     @relation(fields: [actorId], references: [id])
+  note      String?   @db.VarChar(255)
+  lat       Float?
+  lng       Float?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([jobId, createdAt])
+  @@map("job_events")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// A short kind, for the icon: job, rider, cash, system.
+  kind      String    @db.VarChar(20)
+  title     String    @db.VarChar(160)
+  body      String    @db.VarChar(500)
+  /// Where tapping it goes in the app.
+  link      String?   @db.VarChar(200)
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+/// A rider paying MoorMove the commission they owe (cash handed to the office).
+model Settlement {
+  id          String   @id @default(uuid())
+  riderId     String   @map("rider_id")
+  rider       Rider    @relation(fields: [riderId], references: [id])
+  amount      Decimal  @db.Decimal(10, 2)
+  note        String?  @db.VarChar(255)
+  recordedById String  @map("recorded_by_id")
+  recordedBy  User     @relation("SettlementAdmin", fields: [recordedById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  jobs Job[]
+
+  @@index([riderId, createdAt])
+  @@map("settlements")
+}
+
+/// MoorMove's settings (one row): fares, commission and booking rules.
+model Setting {
+  id        Int      @id @default(1)
+  data      Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+/// Updates for E-MOORM about its jobs, waiting to be sent (an outbox): each
+/// one is posted to E-MOORM until it answers, oldest first per job.
+model PartnerEvent {
+  id            String    @id @default(uuid())
+  jobId         String    @map("job_id")
+  job           Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  type          String    @db.VarChar(40)
+  payload       Json
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  sentAt        DateTime? @map("sent_at")
+  /// Stopped trying (after a day without an answer); the admin was told.
+  gaveUpAt      DateTime? @map("gave_up_at")
+  lastError     String?   @map("last_error") @db.VarChar(255)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([sentAt, nextAttemptAt])
+  @@index([jobId, createdAt])
+  @@index([createdAt])
+  @@map("partner_events")
+}

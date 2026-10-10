@@ -1,0 +1,85 @@
+/* Maps (pins, the pin picker's floating controls) and the drawn pictures. */
+
+.map { width: 100%; height: 100%; z-index: 0; background: #e9edf0; font-family: inherit; }
+.route-map { position: relative; border-radius: var(--radius); overflow: hidden; background: #e9edf0; isolation: isolate; }
+.route-map--fill { position: absolute; inset: 0; border-radius: 0; }
+.leaflet-control-attribution { font-size: 9px; background: rgba(255,255,255,0.7) !important; }
+.leaflet-control-zoom { border: 0 !important; box-shadow: var(--shadow) !important; border-radius: 12px !important; overflow: hidden; margin-bottom: 76px !important; }
+.leaflet-control-zoom a { width: 38px !important; height: 38px !important; line-height: 38px !important; color: var(--ink) !important; border-color: var(--line-2) !important; }
+@media (max-width: 899px) { .leaflet-control-zoom { display: none; } }
+.leaflet-tooltip { border: 0; border-radius: 10px; box-shadow: var(--shadow); font: 500 0.82rem Inter, sans-serif; padding: 6px 10px; }
+
+/* A and B pins */
+.map-pin {
+  width: 36px; height: 36px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: grid; place-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.22); border: 3px solid #fff; position: relative;
+}
+.map-pin span { transform: rotate(45deg); color: #fff; font-weight: 800; font-size: 14px; font-family: Inter, sans-serif; }
+.map-pin--pickup { background: var(--green); }
+.map-pin--dropoff { background: var(--pink); }
+.map-pin--faded { opacity: 0.55; filter: saturate(0.7); }
+.map-pin--pulse::before {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%;
+  background: rgba(16, 185, 129, 0.35); animation: ripple 1.8s ease-out infinite; z-index: -1;
+}
+@keyframes ripple { from { transform: scale(0.6); opacity: 1; } to { transform: scale(3.4); opacity: 0; } }
+
+/* The rider, and the signed-in rider ("me") */
+.map-rider { width: 30px; height: 30px; border-radius: 50%; background: rgba(59,130,246,0.22); display: grid; place-items: center; animation: breathe 2s ease-in-out infinite; }
+.map-rider i { width: 18px; height: 18px; border-radius: 50%; background: var(--blue); border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+.map-rider--me { background: rgba(16,185,129,0.22); }
+.map-rider--me i { background: var(--green); }
+@keyframes breathe { 50% { transform: scale(1.18); } }
+
+/* What an open delivery pays, at its pickup */
+.price-pin { display: flex; flex-direction: column; align-items: center; }
+.price-pin span {
+  background: var(--green); color: #fff; font: 700 13px Inter, sans-serif; padding: 6px 11px; border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(4, 120, 87, 0.3); border: 2px solid #fff; white-space: nowrap; cursor: pointer;
+}
+.price-pin::after { content: ''; width: 10px; height: 10px; background: #047857; transform: rotate(45deg); margin-top: -6px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; }
+
+/* Admin live map */
+.job-dot { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+.job-dot--amber { background: var(--amber); animation: breathe 1.6s ease-in-out infinite; }
+.job-dot--blue { background: var(--blue); }
+.rider-dot { width: 16px; height: 16px; border-radius: 4px; transform: rotate(45deg); background: var(--green); border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+.rider-dot--busy { background: var(--violet); }
+
+/* The pin picker's floating hint and "my location" */
+.map-picker { position: relative; }
+.map-hint {
+  position: absolute; z-index: 500; left: 50%; bottom: 40px; transform: translateX(-50%); max-width: calc(100% - 100px);
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; background: rgba(17, 24, 39, 0.82);
+  color: #fff; font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+.map-hint--error { background: var(--red-600); }
+.map-locate {
+  position: absolute; z-index: 500; right: 12px; bottom: 34px; width: 46px; height: 46px; border-radius: 50%; border: 0;
+  background: #fff; color: var(--green-dark); box-shadow: var(--shadow); display: grid; place-items: center;
+}
+.map-locate:hover { background: var(--green-50); }
+@media (max-width: 899px) {
+  .map-hint { bottom: 40px; }
+  .map-locate { bottom: 34px; }
+}
+
+/* A dark veil over the map while the rider is offline */
+.map-veil {
+  position: absolute; inset: 0; z-index: 450; background: rgba(17, 24, 39, 0.42); backdrop-filter: grayscale(0.8);
+  display: grid; place-items: center; pointer-events: none;
+}
+.map-veil span { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 999px; background: rgba(17,24,39,0.75); color: #fff; font-weight: 600; font-size: 0.92rem; }
+
+/* Pictures */
+.empty-art { display: block; margin-inline: auto; width: fit-content; max-width: 100%; height: var(--ea-h, 120px); flex-shrink: 0; user-select: none; }
+.empty-art > svg { display: block; height: 100%; width: auto; max-width: 100%; overflow: visible; }
+@media (max-width: 768px) {
+  .empty:not(.empty--compact) .empty-art { height: min(calc(var(--ea-h, 120px) * 1.25), 220px); }
+}
+.vehicle-art { display: block; flex-shrink: 0; overflow: visible; }
+.hero-art { display: block; width: 100%; height: auto; overflow: visible; }
+
+/* OpenStreetMap's tiles, toned down so the pins and route stand out. */
+.leaflet-tile-pane { filter: saturate(0.72) brightness(1.04) contrast(0.94); }

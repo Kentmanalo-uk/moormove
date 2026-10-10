@@ -1,0 +1,65 @@
+/* Motion: only where it explains a change or answers a tap. Short, eased,
+   transform and opacity only. Turned down for people who ask for less motion. */
+:root {
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --fast: 140ms;
+  --mid: 220ms;
+}
+
+@keyframes enter { from { opacity: 0; transform: translateY(6px); } }
+
+/* An answer opening, a hint changing. */
+.faq__a { animation: reveal var(--mid) var(--ease) both; }
+@keyframes reveal { from { opacity: 0; transform: translateY(-4px); } }
+.map-hint { transition: background-color var(--fast) ease; }
+@keyframes fade-in { from { opacity: 0; } }
+
+/* Feedback: hover, press, focus. */
+.btn, .round-btn, .float-btn, .icon-btn, .tab, .chip-btn, .place-chip, .choice, .role-pick__item,
+.vehicle-pick button, .size-pick__item, .shortcut, .tool, .row, .notif, .faq__q, .search {
+  transition: background-color var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease,
+    box-shadow var(--fast) ease, transform var(--fast) var(--ease);
+}
+.btn:active:not(:disabled), .round-btn:active, .float-btn:active, .chip-btn:active, .tab:active,
+.choice:active:not(:disabled), .role-pick__item:active, .size-pick__item:active { transform: scale(0.98); }
+.dcard, .offer, .kpi, .ride-tile, .ride-card, .town-card, .help-card {
+  transition: border-color var(--fast) ease, background-color var(--fast) ease, transform var(--mid) var(--ease);
+}
+.dcard:hover, .offer:hover, .kpi:hover, .ride-tile:hover, .ride-card:hover { transform: translateY(-1px); }
+.where-box__go, .kpi__go, .help-card__go { transition: transform var(--fast) var(--ease); }
+.where-box:hover .where-box__go, .kpi:hover .kpi__go, .help-card:hover .help-card__go { transform: translateX(3px); }
+.faq__q svg { transition: transform var(--mid) var(--ease); }
+.switch span, .switch span::after { transition-timing-function: var(--ease); }
+
+/* State changes that carry meaning. */
+.progress__dot { transition: background-color var(--mid) ease, border-color var(--mid) ease, color var(--mid) ease; }
+.progress::after { transition: width 500ms var(--ease); }
+.apply-progress__bar i { transition: width 400ms var(--ease); }
+.go-btn { transition: background-color var(--mid) ease, color var(--mid) ease, transform var(--fast) var(--ease); }
+.map-veil { animation: fade-in var(--mid) ease both; }
+.toast { animation: toast-in var(--mid) var(--ease) both; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+.sheet { animation: rise var(--mid) var(--ease); }
+
+/* Phones: as the page slides over the map, the map dims and drifts up a little. */
+@supports (animation-timeline: scroll()) {
+  @media (max-width: 899px) and (prefers-reduced-motion: no-preference) {
+    .map-page__shade { animation: map-shade linear both; animation-timeline: scroll(root); animation-range: 0 40vh; }
+    .map-page__map > .route-map, .map-page__map > .map-picker { animation: map-drift linear both; animation-timeline: scroll(root); animation-range: 0 40vh; }
+    .map-page__float::before { animation: fade-bar linear both; animation-timeline: scroll(root); animation-range: 30vh 42vh; }
+  }
+}
+@keyframes map-shade { to { opacity: 0.2; } }
+@keyframes fade-bar { to { opacity: 1; } }
+@keyframes map-drift { to { transform: translateY(-10%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  .dcard:hover, .offer:hover, .kpi:hover, .ride-tile:hover, .ride-card:hover { transform: none; }
+}
