@@ -28,7 +28,7 @@ module.exports = {
   // /home/<user>/moormove-data/uploads. Default: backend/uploads.
   uploadDir: require('path').resolve(process.env.UPLOAD_DIR || require('path').join(__dirname, '..', '..', 'uploads')),
   partnerSecret,
-  // One app for move.emoorm.shop: the API also serves the built web app
+  // One app for moormove.emoorm.shop: the API also serves the built web app
   // (web/dist). On in production, or with SERVE_WEB=1.
   serveWeb: nodeEnv === 'production' || process.env.SERVE_WEB === '1',
   // Run `prisma migrate deploy` once the server is listening (production, or

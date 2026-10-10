@@ -2,7 +2,7 @@
   "name": "moormove",
   "private": true,
   "version": "0.1.0",
-  "description": "MoorMove (move.emoorm.shop): one Node app that serves the API and the built web app.",
+  "description": "MoorMove (moormove.emoorm.shop): one Node app that serves the API and the built web app.",
   "engines": {
     "node": ">=20"
   },

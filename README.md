@@ -101,12 +101,12 @@ API). Without it the partner API answers 503 and nothing is sent.
   30 min) for a day; then the admins get a notification. Sent updates are
   kept 7 days. Fares & settings shows whether the link works.
 
-## Deploy on Hostinger (move.emoorm.shop)
+## Deploy on Hostinger (moormove.emoorm.shop)
 
 One Node.js app serves both the API and the web app.
 
 1. **Database:** create a MySQL database and user in hPanel.
-2. **Subdomain:** add `move.emoorm.shop` and create a Node.js app on it
+2. **Subdomain:** add `moormove.emoorm.shop` and create a Node.js app on it
    (Node 20+), from this folder's own Git repository (MoorMove is not part of
    E-MOORM's repository).
 3. **Build and start:**
@@ -120,10 +120,10 @@ One Node.js app serves both the API and the web app.
    - `NODE_ENV=production` (serves `web/dist` and migrates on start)
    - `DATABASE_URL=mysql://USER:PASSWORD@localhost:3306/DATABASE`
    - `JWT_SECRET` (48+ random characters)
-   - `WEB_ORIGIN=https://move.emoorm.shop`
+   - `WEB_ORIGIN=https://moormove.emoorm.shop`
    - `EMOORM_API_URL=https://emoorm.shop/api`
    - `PARTNER_SECRET` = the same value as E-MOORM's `MOORMOVE_SECRET`; on
-     E-MOORM set `MOORMOVE_API_URL=https://move.emoorm.shop/api`.
+     E-MOORM set `MOORMOVE_API_URL=https://moormove.emoorm.shop/api`.
    - `UPLOAD_DIR=/home/<your-user>/moormove-data/uploads` (outside the app
      folder, so a redeploy keeps riders' documents and proof photos).
 5. **First admin:** in the app's terminal, `cd backend && npm run

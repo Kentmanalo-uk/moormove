@@ -40,7 +40,7 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/partner', require('./routes/partner'));
 
-// The web app (move.emoorm.shop runs as one app): its files, and index.html
+// The web app (moormove.emoorm.shop runs as one app): its files, and index.html
 // for every other page so the app's own routes work on reload.
 const WEB = path.join(__dirname, '..', '..', 'web', 'dist');
 if (config.serveWeb && fs.existsSync(path.join(WEB, 'index.html'))) {

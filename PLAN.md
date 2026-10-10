@@ -155,7 +155,7 @@ README.md, "E-MOORM link".
    - tricycles: TODA and MTOP too.
 4. **Pilot:** which town(s) first?
 5. **Hosting**, when it goes beyond this PC: its own subdomain (e.g.
-   `move.emoorm.shop`) with its own database on Hostinger?
+   `moormove.emoorm.shop`) with its own database on Hostinger?
 
 ---
 
