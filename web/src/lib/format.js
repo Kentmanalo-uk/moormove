@@ -45,8 +45,27 @@ export const JOB_STATUS = {
   AT_DROPOFF: { label: 'Arrived', tone: 'blue', customer: 'Your rider has arrived at the drop-off', rider: 'Hand over the package' },
   DELIVERED: { label: 'Delivered', tone: 'green', customer: 'Delivered', rider: 'Delivered' },
   CANCELLED: { label: 'Cancelled', tone: 'grey', customer: 'Cancelled', rider: 'Cancelled' },
+  // An E-MOORM parcel that couldn't be delivered, on its way back to the shop.
+  RETURNING: { label: 'Returning', tone: 'amber', customer: 'Coming back to the sender', rider: 'Return the parcel' },
   FAILED: { label: 'Not delivered', tone: 'red', customer: "Couldn't be delivered", rider: 'Not delivered' },
 };
+
+/**
+ * Why a rider couldn't deliver. On an E-MOORM order, the buyer's fault means
+ * the rider is still paid for the trip. OTHER needs a note.
+ */
+export const FAIL_REASONS = [
+  { code: 'BUYER_REFUSED', label: 'Buyer refused the parcel', buyerFault: true },
+  { code: 'BUYER_UNREACHABLE', label: "Buyer not there / didn't answer", buyerFault: true },
+  { code: 'WRONG_ADDRESS', label: 'Wrong address or pin', buyerFault: true },
+  { code: 'PARCEL_DAMAGED', label: 'Parcel damaged', buyerFault: false },
+  { code: 'WRONG_ITEM', label: 'Wrong or missing item', buyerFault: false },
+  { code: 'RIDER_PROBLEM', label: 'Rider problem (vehicle, accident)', buyerFault: false },
+  { code: 'OTHER', label: 'Other', buyerFault: false },
+];
+
+/** The fail reason for a code, or null (old jobs have none). */
+export const failReasonOf = (code) => FAIL_REASONS.find((r) => r.code === code) || null;
 
 export const RIDER_STATUS = {
   DRAFT: { label: 'Not sent yet', tone: 'grey' },
@@ -57,7 +76,8 @@ export const RIDER_STATUS = {
   SUSPENDED: { label: 'Suspended', tone: 'red' },
 };
 
-export const ACTIVE = ['ACCEPTED', 'AT_PICKUP', 'PICKED_UP', 'AT_DROPOFF'];
+// RETURNING is still the rider's job (bring the parcel back) until the shop confirms.
+export const ACTIVE = ['ACCEPTED', 'AT_PICKUP', 'PICKED_UP', 'AT_DROPOFF', 'RETURNING'];
 
 export const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
 

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, ChatText, CheckCircle, ClipboardText, Gift, MagnifyingGlass, MapPin, MapTrifold, Moped, NavigationArrow, Package,
+  ArrowRight, ArrowUUpLeft, ChatText, CheckCircle, ClipboardText, Gift, MagnifyingGlass, MapPin, MapTrifold, Moped, NavigationArrow, Package,
   Phone, Star, Storefront, XCircle,
 } from '@phosphor-icons/react';
 import { dateTime, JOB_STATUS, km, mapsLink, peso, plural, SIZES, smsLink, telLink, time, VEHICLES } from '../lib/format';
@@ -90,6 +90,31 @@ export const orderPayText = (job) => {
     : `The shop pays you ${fee} at pickup; collect nothing from the buyer.`;
 };
 
+/** "Parcel returned Oct 12, 3:40 PM" on a failed delivery whose parcel is back with the shop. */
+export const returnedText = (job) => (job?.returnedAt ? `Parcel returned ${dateTime(job.returnedAt)}` : '');
+
+/** A trip that ended without delivering: the parcel coming back, or back. */
+export const failedTrip = (job) => ['FAILED', 'RETURNING'].includes(job?.status);
+
+/** The rider is still paid for a failed trip (the buyer's fault, on an E-MOORM order). */
+export const tripPaid = (job) => Boolean(job?.tripPay ? job.tripPay.paid : job?.failPaid);
+
+/** What the rider earns for a paid failed trip. */
+export const tripEarning = (job) => (job?.tripPay ? job.tripPay.earning : job?.riderEarning) ?? 0;
+
+/** Who pays whom for a failed E-MOORM trip, as receipt rows (`rider`: said to the rider). */
+export function TripPayRows({ pay, rider = false }) {
+  if (!pay) return null;
+  return (
+    <>
+      {pay.shopPays > 0 && <div className="kv"><dt>{rider ? 'The shop pays you' : 'Shop pays the rider'}</dt><dd className="tone-green">{peso(pay.shopPays)}</dd></div>}
+      {pay.moormovePays > 0 && <div className="kv"><dt>{rider ? 'MoorMove pays you' : 'MoorMove pays the rider'}</dt><dd className="tone-green">{peso(pay.moormovePays)}</dd></div>}
+      {pay.kept > 0 && <div className="kv"><dt>{rider ? "You keep the shop's fee" : "Rider keeps the shop's fee"}</dt><dd className="tone-green">{peso(pay.kept)}</dd></div>}
+      {pay.giveBack > 0 && <div className="kv"><dt>{rider ? 'Give back to the shop' : 'Rider gives back to the shop'}</dt><dd className="tone-amber">{peso(pay.giveBack)}</dd></div>}
+    </>
+  );
+}
+
 /** A and B, one above the other, joined by a dotted line. */
 export function MiniRoute({ from, to, light = false }) {
   return (
@@ -152,6 +177,7 @@ export function StatusBlock({ status, title, text, extra }) {
         {status === 'SEARCHING' && <MagnifyingGlass size={24} weight="bold" />}
         {status === 'DELIVERED' && <CheckCircle size={28} weight="fill" />}
         {(status === 'CANCELLED' || status === 'FAILED') && <XCircle size={28} weight="fill" />}
+        {status === 'RETURNING' && <ArrowUUpLeft size={26} weight="bold" />}
         {live && <NavigationArrow size={24} weight="fill" />}
       </span>
       <div className="status-block__text">
@@ -165,7 +191,7 @@ export function StatusBlock({ status, title, text, extra }) {
 
 // The address with its barangay, unless the address already names it (E-MOORM
 // addresses come whole: "12 Rizal St., Lalud, Calapan City").
-const place = (s) => (s.barangay && !String(s.address || '').toLowerCase().includes(s.barangay.toLowerCase())
+export const place = (s) => (s.barangay && !String(s.address || '').toLowerCase().includes(s.barangay.toLowerCase())
   ? `${s.address}, ${s.barangay}`
   : s.address);
 
@@ -247,6 +273,8 @@ export function Timeline({ events }) {
 /** Package, fare, who pays and COD, as a receipt. */
 export function MoneyBlock({ job, rider = false }) {
   const order = job.source === 'EMOORM';
+  // Not delivered: the rider sees what this trip really pays, not the delivery's earning.
+  const failed = rider && failedTrip(job);
   return (
     <>
       <div className="pkg-line">
@@ -266,16 +294,21 @@ export function MoneyBlock({ job, rider = false }) {
           ? (job.feePaidBy === 'SENDER' ? 'The shop, at pickup' : 'The buyer, at drop-off')
           : (job.feePaidBy === 'SENDER' ? 'Sender, at pickup' : 'Recipient, at drop-off')}</dd></div>}
         {!isFree(job) && <div className="kv"><dt>Payment</dt><dd>Cash</dd></div>}
-        {isFree(job) && job.riderEarning !== undefined && (
+        {isFree(job) && job.riderEarning !== undefined && !failed && (
           <div className="kv"><dt>{rider ? 'MoorMove pays you' : 'MoorMove pays the rider'}</dt><dd className="tone-green">{peso(moormovePays(job))}</dd></div>
         )}
         {job.codAmount > 0 && <div className="kv"><dt>{order ? 'COD for the shop' : 'COD to collect'}</dt><dd className="tone-amber">{peso(job.codAmount)}</dd></div>}
-        {order && buyerPays(job) > 0 && <div className="kv"><dt>Buyer pays you</dt><dd className="tone-amber">{peso(buyerPays(job))}</dd></div>}
-        {rider && job.riderEarning !== undefined && (
+        {order && buyerPays(job) > 0 && !failed && <div className="kv"><dt>Buyer pays you</dt><dd className="tone-amber">{peso(buyerPays(job))}</dd></div>}
+        {failed && <TripPayRows pay={job.tripPay} rider />}
+        {rider && job.riderEarning !== undefined && (failed ? (
+          tripPaid(job)
+            ? <div className="kv kv--total"><dt>You earn<small className="kv__sub">for a failed trip (buyer&apos;s fault)</small></dt><dd className="tone-green">{peso(tripEarning(job))}</dd></div>
+            : <div className="kv kv--total"><dt>You earn</dt><dd className="muted">No pay for this trip</dd></div>
+        ) : (
           <div className="kv kv--total"><dt>You earn</dt><dd className="tone-green">{peso(job.riderEarning)}</dd></div>
-        )}
+        ))}
       </dl>
-      {rider && order && <p className="small muted order-pay">{orderPayText(job)}</p>}
+      {rider && order && !failed && <p className="small muted order-pay">{orderPayText(job)}</p>}
     </>
   );
 }

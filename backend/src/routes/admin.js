@@ -42,10 +42,14 @@ router.get('/summary', async (req, res) => {
     prisma.job.count({ where: { status: 'SEARCHING' } }),
     prisma.job.count({ where: { status: { in: jobs.ACTIVE } } }),
     prisma.job.count({ where: { createdAt: { gte: today } } }),
-    prisma.job.aggregate({ where: { status: 'DELIVERED', deliveredAt: { gte: today } }, _count: { _all: true }, _sum: { fee: true, platformCut: true } }),
+    prisma.job.groupBy({ by: ['status'], where: jobs.paidWhere(today), _count: { _all: true }, _sum: { fee: true, platformCut: true } }),
     prisma.job.count({ where: { status: { in: ['CANCELLED', 'FAILED'] }, updatedAt: { gte: today } } }),
-    prisma.job.groupBy({ by: ['riderId'], where: { status: 'DELIVERED', settlementId: null, riderId: { not: null } }, _sum: { platformCut: true } }),
+    prisma.job.groupBy({ by: ['riderId'], where: { settlementId: null, riderId: { not: null }, ...jobs.paidWhere() }, _sum: { platformCut: true } }),
   ]);
+  // Delivered today, and paid failed trips (the buyer's fault) whose money counts too.
+  const paidToday = (field) => deliveredToday.reduce((sum, g) => sum + (Number(g._sum[field]) || 0), 0);
+  const deliveredCount = deliveredToday.find((g) => g.status === 'DELIVERED')?._count._all || 0;
+  const paidFailsToday = deliveredToday.find((g) => g.status === 'FAILED')?._count._all || 0;
 
   const week = await prisma.job.findMany({
     where: { status: 'DELIVERED', deliveredAt: { gte: weekStart } },
@@ -88,10 +92,12 @@ router.get('/summary', async (req, res) => {
       active,
       today: {
         booked: bookedToday,
-        delivered: deliveredToday._count._all,
+        delivered: deliveredCount,
+        // Failed trips that still pay the rider (the buyer's fault); in fees and commission.
+        paidFails: paidFailsToday,
         cancelled: cancelledToday,
-        fees: money(deliveredToday._sum.fee),
-        commission: money(deliveredToday._sum.platformCut),
+        fees: money(paidToday('fee')),
+        commission: money(paidToday('platformCut')),
       },
       // What riders owe MoorMove, and what MoorMove owes riders for free
       // deliveries (each rider's balance counted one way).
@@ -191,13 +197,17 @@ router.get('/riders/:id', async (req, res) => {
   const rider = await prisma.rider.findUnique({ where: { id: String(req.params.id) }, include: riderInclude });
   if (!rider) throw new ApiError('Rider not found', 404);
   const summary = await jobs.riderSummary(rider);
-  const earned = await prisma.job.aggregate({ where: { riderId: rider.id, status: 'DELIVERED' }, _sum: { riderEarning: true } });
-  const owed = await prisma.job.aggregate({ where: { riderId: rider.id, status: 'DELIVERED', settlementId: null }, _sum: { platformCut: true } });
+  // Delivered jobs and paid failed trips (the buyer's fault) both pay.
+  const earned = await prisma.job.aggregate({ where: { riderId: rider.id, ...jobs.paidWhere() }, _sum: { riderEarning: true } });
+  const owed = await prisma.job.aggregate({ where: { riderId: rider.id, settlementId: null, ...jobs.paidWhere() }, _sum: { platformCut: true } });
   const recent = await prisma.job.findMany({
     where: { riderId: rider.id },
     orderBy: { updatedAt: 'desc' },
     take: 10,
-    select: { id: true, code: true, status: true, pickupBarangay: true, dropoffBarangay: true, riderEarning: true, rating: true, updatedAt: true },
+    select: {
+      id: true, code: true, status: true, pickupBarangay: true, dropoffBarangay: true, riderEarning: true, rating: true, updatedAt: true,
+      failCode: true, buyerFault: true, failPaid: true,
+    },
   });
   res.json({
     success: true,
@@ -363,7 +373,7 @@ const JOB_TABS = {
   searching: { status: 'SEARCHING' },
   active: { status: { in: jobs.ACTIVE } },
   delivered: { status: 'DELIVERED' },
-  problems: { status: { in: ['CANCELLED', 'FAILED'] } },
+  problems: { status: { in: ['CANCELLED', 'FAILED', 'RETURNING'] } },
   all: {},
 };
 
@@ -402,6 +412,8 @@ router.get('/jobs', async (req, res) => {
         pickupName: j.pickupName, pickupBarangay: j.pickupBarangay, dropoffName: j.dropoffName, dropoffBarangay: j.dropoffBarangay,
         fee: Number(j.fee), codAmount: Number(j.codAmount), riderName: j.rider?.user?.fullName || null,
         source: j.source, externalCode: j.externalCode, createdAt: j.createdAt,
+        // A failed one: why (lib/failReasons.js), the buyer's fault, and whether the trip pays the rider.
+        failCode: j.failCode || null, failReason: j.failReason, buyerFault: j.buyerFault, failPaid: j.failPaid,
         // A free-delivery promo, the usual fare, and where it goes when that's another town.
         promo: j.promo || null, listFee: j.listFee === null ? null : Number(j.listFee),
         dropoffTown: j.dropoffTown && j.dropoffTown.id !== j.townId ? j.dropoffTown : null,
@@ -484,8 +496,10 @@ router.post('/jobs/:id/cancel', async (req, res) => {
   if (!job) throw new ApiError('Delivery not found', 404);
   const reason = text(req.body?.reason, 255);
   if (!reason) throw new ApiError('Give a reason', 422, { reason: 'Required' });
+  // A parcel on its way back is closed with "Parcel returned", not cancelled.
+  if (job.status === 'RETURNING') throw new ApiError('The rider is bringing this parcel back. Mark it returned once the shop has it.', 409);
   const updated = await jobs.move(job, {
-    from: jobs.OPEN,
+    from: jobs.OPEN.filter((s) => s !== 'RETURNING'),
     to: 'CANCELLED',
     data: { cancelledAt: new Date(), cancelReason: reason },
     actorId: req.user.id,
@@ -499,12 +513,29 @@ router.post('/jobs/:id/cancel', async (req, res) => {
   res.json({ success: true, data: await jobs.jobView(updated, req.user) });
 });
 
+/**
+ * MoorMove's staff close a return the shop never confirmed: the parcel is
+ * back with the shop (RETURNING -> FAILED with returnedAt). E-MOORM hears it
+ * like any step.
+ */
+router.post('/jobs/:id/returned', async (req, res) => {
+  const job = await prisma.job.findUnique({ where: { id: String(req.params.id) }, include: jobs.jobInclude });
+  if (!job) throw new ApiError('Delivery not found', 404);
+  const updated = await jobs.closeReturn(job, { actorId: req.user.id, note: 'Marked returned by MoorMove' });
+  if (job.rider) {
+    await notify(job.rider.userId, {
+      kind: 'job', title: 'Parcel marked returned', body: `MoorMove marked the parcel for ${job.code} as back with ${job.pickupName}.`, link: `/rider/jobs/${job.id}`,
+    });
+  }
+  res.json({ success: true, data: await jobs.jobView(updated, req.user) });
+});
+
 /* ── Cash: commission riders owe ──────────────────────────────────────── */
 
 router.get('/cash', async (req, res) => {
   const owed = await prisma.job.groupBy({
     by: ['riderId'],
-    where: { status: 'DELIVERED', settlementId: null, riderId: { not: null } },
+    where: { settlementId: null, riderId: { not: null }, ...jobs.paidWhere() },
     _sum: { platformCut: true },
     _count: { _all: true },
   });
@@ -552,7 +583,7 @@ router.post('/cash/:riderId/settle', async (req, res) => {
   if (!rider) throw new ApiError('Rider not found', 404);
   const note = text(req.body?.note, 255) || null;
   const settlement = await prisma.$transaction(async (tx) => {
-    const due = await tx.job.findMany({ where: { riderId, status: 'DELIVERED', settlementId: null }, select: { id: true, platformCut: true } });
+    const due = await tx.job.findMany({ where: { riderId, settlementId: null, ...jobs.paidWhere() }, select: { id: true, platformCut: true } });
     const amount = money(due.reduce((s, j) => s + Number(j.platformCut), 0));
     if (!due.length || amount === 0) throw new ApiError('Nothing is owed either way right now', 409);
     const row = await tx.settlement.create({ data: { riderId, amount, note, recordedById: req.user.id } });
@@ -576,13 +607,14 @@ const isLive = (p) => p.active && (!p.endsAt || p.endsAt > new Date());
 const promoWithUse = async (p) => {
   const [count, delivered] = await Promise.all([
     prisma.job.count({ where: { promoId: p.id } }),
-    prisma.job.aggregate({ where: { promoId: p.id, status: 'DELIVERED' }, _count: { _all: true }, _sum: { riderEarning: true } }),
+    prisma.job.groupBy({ by: ['status'], where: { promoId: p.id, ...jobs.paidWhere() }, _count: { _all: true }, _sum: { riderEarning: true } }),
   ]);
   return promos.view(p, {
     createdBy: p.createdBy?.fullName || null,
     jobs: count,
-    delivered: delivered._count._all,
-    paidToRiders: money(delivered._sum.riderEarning),
+    delivered: delivered.find((g) => g.status === 'DELIVERED')?._count._all || 0,
+    // Delivered jobs and failed trips that still paid the rider (the buyer's fault).
+    paidToRiders: money(delivered.reduce((sum, g) => sum + (Number(g._sum.riderEarning) || 0), 0)),
   });
 };
 

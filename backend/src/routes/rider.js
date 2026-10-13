@@ -8,10 +8,11 @@ const { authenticate, allow } = require('../middleware/auth');
 const { ApiError } = require('../middleware/errors');
 const { text, phone, isPhone, failIf } = require('../lib/check');
 const { haversineKm, isPoint } = require('../lib/geo');
-const { notifyAdmins } = require('../lib/notify');
+const { notify, notifyAdmins } = require('../lib/notify');
 const jobs = require('../lib/jobs');
 const areas = require('../lib/areas');
 const promos = require('../lib/promos');
+const { readFail } = require('../lib/failReasons');
 const { publicUser } = require('./auth');
 
 const router = express.Router();
@@ -195,28 +196,45 @@ const activeJob = (riderId) => prisma.job.findFirst({
 
 const startOfDay = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
+/**
+ * Paying jobs grouped by status (jobs.paidWhere) as the rider's totals:
+ * { earnings, deliveries (delivered only), km, paidFails (paid failed trips) }.
+ */
+const sumUp = (groups) => {
+  const out = {
+    earnings: 0, deliveries: 0, km: 0, paidFails: 0,
+  };
+  for (const g of groups) {
+    out.earnings += Number(g._sum.riderEarning) || 0;
+    out.km += Number(g._sum.distanceKm) || 0;
+    if (g.status === 'DELIVERED') out.deliveries += g._count._all;
+    else out.paidFails += g._count._all;
+  }
+  out.earnings = Math.round(out.earnings * 100) / 100;
+  out.km = Math.round(out.km * 100) / 100;
+  return out;
+};
+
 /** Everything the rider's home screen shows. */
 router.get('/dashboard', async (req, res) => {
   const rider = await ensureRider(req.user.id);
   const data = { rider: riderView(rider), active: null, today: null, owed: 0 };
   if (rider.status === 'APPROVED') {
     const active = await activeJob(rider.id);
-    const today = await prisma.job.aggregate({
-      where: { riderId: rider.id, status: 'DELIVERED', deliveredAt: { gte: startOfDay() } },
+    // Delivered jobs and paid failed trips (the buyer's fault) both pay.
+    const today = await prisma.job.groupBy({
+      by: ['status'],
+      where: { riderId: rider.id, ...jobs.paidWhere(startOfDay()) },
       _sum: { riderEarning: true, distanceKm: true },
       _count: { _all: true },
     });
     const owed = await prisma.job.aggregate({
-      where: { riderId: rider.id, status: 'DELIVERED', settlementId: null },
+      where: { riderId: rider.id, settlementId: null, ...jobs.paidWhere() },
       _sum: { platformCut: true },
     });
     const summary = await jobs.riderSummary({ ...rider, user: req.user });
     data.active = active ? await jobs.jobView(active, req.user) : null;
-    data.today = {
-      earnings: jobs.num(today._sum.riderEarning) || 0,
-      deliveries: today._count._all,
-      km: jobs.num(today._sum.distanceKm) || 0,
-    };
+    data.today = sumUp(today);
     // Signed: positive, the rider owes MoorMove commission; negative, MoorMove
     // owes the rider (free-delivery promos). owedDirection says which.
     data.owed = jobs.num(owed._sum.platformCut) || 0;
@@ -384,27 +402,56 @@ router.post('/jobs/:id/release', async (req, res) => {
   res.json({ success: true, data: { released: true } });
 });
 
-/** After pickup: the delivery can't be completed (the package goes back). */
+/**
+ * After pickup: the delivery can't be completed, so the package goes back.
+ * An E-MOORM order's job becomes RETURNING: the rider's task is to return
+ * the parcel to the shop, and the job ends (FAILED, returnedAt) when the shop
+ * confirms it has it. Other jobs fail at once.
+ *
+ * The rider says why: { reasonCode, note } from lib/failReasons.js (an older
+ * app's { reason } is taken as OTHER). An E-MOORM trip that failed by the
+ * buyer's fault (refused, not there, wrong address) still pays the rider,
+ * once the parcel is back (jobs.closeReturn); any other failed trip earns
+ * nothing.
+ */
 router.post('/jobs/:id/fail', async (req, res) => {
   const rider = await working(req.user.id);
   const job = await myJob(req.params.id, rider);
-  const reason = text(req.body?.reason, 255);
-  if (!reason) throw new ApiError('Tell us what happened', 422, { reason: 'Required' });
+  const { failCode, buyerFault, failReason: reason } = readFail(req.body);
+  const returning = job.source === 'EMOORM';
   const updated = await jobs.move(job, {
     from: ['PICKED_UP', 'AT_DROPOFF'],
-    to: 'FAILED',
-    data: { failedAt: new Date(), failReason: reason },
+    to: returning ? 'RETURNING' : 'FAILED',
+    data: {
+      failedAt: new Date(), failReason: reason, failCode, buyerFault,
+    },
     actorId: req.user.id,
     note: reason,
   });
   await jobs.tellCustomer(updated, `${updated.code} couldn't be delivered`, `${reason}. The rider will bring the package back to ${updated.pickupName}.`);
   await jobs.failAlert(updated, `${req.user.fullName}: ${reason}`);
+  if (returning) {
+    const pay = jobs.tripPay(updated);
+    const peso = (n) => `₱${Number(n).toFixed(0)}`;
+    let payLine = '';
+    if (pay?.paid) {
+      payLine = ` You still earn ${peso(pay.earning)} for this trip${pay.shopPays ? `: the shop pays you ${peso(pay.shopPays)} when you return the parcel` : pay.moormovePays ? ' (MoorMove pays it)' : ''}.`;
+    } else if (pay) {
+      payLine = ` No pay for this trip.${pay.giveBack ? ` Give back the ${peso(pay.giveBack)} fee the shop paid you.` : ''}`;
+    }
+    await notify(req.user.id, {
+      kind: 'job',
+      title: `Return the parcel to ${updated.pickupName}`,
+      body: `Bring ${updated.externalCode ? `order #${updated.externalCode}` : updated.code} back to ${updated.pickupAddress}. The shop confirms once it has it; then you can take new deliveries.${payLine}`,
+      link: `/rider/jobs/${updated.id}`,
+    });
+  }
   res.json({ success: true, data: await jobs.jobView(updated, req.user) });
 });
 
 const HISTORY = {
   completed: { status: 'DELIVERED' },
-  other: { status: { in: ['FAILED', 'CANCELLED'] } },
+  other: { status: { in: ['FAILED', 'CANCELLED', 'RETURNING'] } },
 };
 
 router.get('/jobs', async (req, res) => {
@@ -426,7 +473,9 @@ router.get('/jobs', async (req, res) => {
       id: j.id, code: j.code, status: j.status, source: j.source, externalCode: j.externalCode,
       pickupBarangay: j.pickupBarangay, dropoffBarangay: j.dropoffBarangay,
       riderEarning: Number(j.riderEarning), codAmount: Number(j.codAmount), distanceKm: Number(j.distanceKm),
-      rating: j.rating, deliveredAt: j.deliveredAt, updatedAt: j.updatedAt,
+      rating: j.rating, deliveredAt: j.deliveredAt, returnedAt: j.returnedAt, updatedAt: j.updatedAt,
+      // A failed trip: why, whether it was the buyer's fault, and whether it pays (failPaid).
+      failReason: j.failReason, failedAt: j.failedAt, failCode: j.failCode || null, buyerFault: j.buyerFault, failPaid: j.failPaid,
       // Free-delivery promo, the usual fare, and the towns (for 'Calapan City → Baco').
       promo: j.promo || null, listFee: j.listFee === null ? null : Number(j.listFee),
       townId: j.townId, townName: j.town?.name || null,
@@ -440,60 +489,85 @@ router.get('/jobs/:id', async (req, res) => {
   res.json({ success: true, data: await jobs.jobView(job, req.user) });
 });
 
-/** Earnings: today, the last 7 days by day, this month, all time, and cash. */
+/**
+ * Earnings: today, the last 7 days by day, this month, all time, and cash.
+ * Paid failed trips (the buyer's fault) count with the deliveries: in the
+ * earnings and km, apart in paidFails, by when the parcel was back.
+ */
 router.get('/earnings', async (req, res) => {
   const rider = await ensureRider(req.user.id);
-  const delivered = { riderId: rider.id, status: 'DELIVERED' };
-  const sum = async (from) => {
-    const a = await prisma.job.aggregate({
-      where: { ...delivered, ...(from ? { deliveredAt: { gte: from } } : {}) },
-      _sum: { riderEarning: true, distanceKm: true },
-      _count: { _all: true },
-    });
-    return { earnings: jobs.num(a._sum.riderEarning) || 0, deliveries: a._count._all, km: jobs.num(a._sum.distanceKm) || 0 };
-  };
+  const mine = { riderId: rider.id };
+  const sum = async (from) => sumUp(await prisma.job.groupBy({
+    by: ['status'],
+    where: { ...mine, ...jobs.paidWhere(from) },
+    _sum: { riderEarning: true, distanceKm: true },
+    _count: { _all: true },
+  }));
   const today = startOfDay();
   const weekStart = new Date(today);
   weekStart.setDate(weekStart.getDate() - 6);
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 
   const week = await prisma.job.findMany({
-    where: { ...delivered, deliveredAt: { gte: weekStart } },
-    select: { riderEarning: true, deliveredAt: true },
+    where: { ...mine, ...jobs.paidWhere(weekStart) },
+    select: {
+      status: true, riderEarning: true, deliveredAt: true, returnedAt: true,
+    },
   });
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + i);
-    return { date: d.toISOString().slice(0, 10), day: d, earnings: 0, deliveries: 0 };
+    return {
+      date: d.toISOString().slice(0, 10), day: d, earnings: 0, deliveries: 0, paidFails: 0,
+    };
   });
   for (const j of week) {
-    const i = Math.floor((startOfDay(j.deliveredAt) - weekStart) / 86400000);
+    const i = Math.floor((startOfDay(jobs.doneAt(j)) - weekStart) / 86400000);
     if (days[i]) {
       days[i].earnings += Number(j.riderEarning);
-      days[i].deliveries += 1;
+      if (j.status === 'DELIVERED') days[i].deliveries += 1;
+      else days[i].paidFails += 1;
     }
   }
   const owedRows = await prisma.job.findMany({
-    where: { ...delivered, settlementId: null },
-    select: { id: true, code: true, platformCut: true, deliveredAt: true },
-    orderBy: { deliveredAt: 'desc' },
+    where: { ...mine, settlementId: null, ...jobs.paidWhere() },
+    select: {
+      id: true, code: true, platformCut: true, deliveredAt: true, returnedAt: true,
+    },
+    orderBy: { updatedAt: 'desc' },
   });
-  const balance = promos.balance(owedRows.reduce((sum, j) => sum + Number(j.platformCut), 0));
+  const balance = promos.balance(owedRows.reduce((total, j) => total + Number(j.platformCut), 0));
   const settlements = await prisma.settlement.findMany({
     where: { riderId: rider.id },
     orderBy: { createdAt: 'desc' },
     take: 20,
-    select: { id: true, amount: true, note: true, createdAt: true },
-  });
-  const recent = await prisma.job.findMany({
-    where: delivered,
-    orderBy: { deliveredAt: 'desc' },
-    take: 15,
     select: {
-      id: true, code: true, pickupBarangay: true, dropoffBarangay: true, riderEarning: true, fee: true, listFee: true, platformCut: true, deliveredAt: true,
-      promo: { select: { id: true, title: true } },
+      id: true, amount: true, note: true, createdAt: true,
     },
   });
+  const recent = (await prisma.job.findMany({
+    where: { ...mine, ...jobs.paidWhere() },
+    orderBy: { updatedAt: 'desc' },
+    take: 30,
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      pickupBarangay: true,
+      dropoffBarangay: true,
+      riderEarning: true,
+      fee: true,
+      listFee: true,
+      platformCut: true,
+      deliveredAt: true,
+      returnedAt: true,
+      failPaid: true,
+      failReason: true,
+      promo: { select: { id: true, title: true } },
+    },
+  }))
+    .sort((a, b) => jobs.doneAt(b) - jobs.doneAt(a))
+    .slice(0, 15);
   res.json({
     success: true,
     data: {
@@ -501,16 +575,26 @@ router.get('/earnings', async (req, res) => {
       week: await sum(weekStart),
       month: await sum(monthStart),
       all: await sum(null),
-      days: days.map(({ date, earnings, deliveries }) => ({ date, earnings: Math.round(earnings * 100) / 100, deliveries })),
+      days: days.map(({
+        date, earnings, deliveries, paidFails,
+      }) => ({
+        date, earnings: Math.round(earnings * 100) / 100, deliveries, paidFails,
+      })),
       // Signed: positive, the rider owes MoorMove; negative, MoorMove owes the
       // rider (free deliveries). owedDirection: RIDER_OWES | MOORMOVE_OWES | SETTLED.
       owed: balance.owed,
       owedDirection: balance.direction,
       moormoveOwes: balance.direction === 'MOORMOVE_OWES' ? balance.amount : 0,
       owedJobs: owedRows.length,
-      settlements: settlements.map((s) => ({ ...s, amount: Number(s.amount) })),
+      settlements: settlements.map((x) => ({ ...x, amount: Number(x.amount) })),
+      // A paid failed trip has failPaid and no deliveredAt; doneAt is when it ended.
       recent: recent.map((j) => ({
-        ...j, riderEarning: Number(j.riderEarning), fee: Number(j.fee), listFee: j.listFee === null ? null : Number(j.listFee), platformCut: Number(j.platformCut),
+        ...j,
+        doneAt: jobs.doneAt(j),
+        riderEarning: Number(j.riderEarning),
+        fee: Number(j.fee),
+        listFee: j.listFee === null ? null : Number(j.listFee),
+        platformCut: Number(j.platformCut),
       })),
     },
   });

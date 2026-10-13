@@ -1,10 +1,13 @@
 import { Link } from 'react-router-dom';
-import { CheckCircle, Coins, Gift, HandCoins, Info, Receipt, TrendUp } from '@phosphor-icons/react';
+import { ArrowUUpLeft, CheckCircle, Coins, Gift, HandCoins, Info, Receipt, TrendUp } from '@phosphor-icons/react';
 import { useLive } from '../../lib/hooks';
 import { date, dateTime, km, peso, plural } from '../../lib/format';
 import { Empty, Loading, PageHead, StatStrip } from '../../components/ui';
 
 const DAY = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'short' });
+
+/** "12 trips", or "12 trips + 1 failed" when paid failed trips count in the sum. */
+const trips = (sum) => `${plural(sum.deliveries, 'trip')}${sum.paidFails > 0 ? ` + ${sum.paidFails} failed` : ''}`;
 
 export default function Earnings() {
   const { data, error } = useLive('/rider/earnings', { every: 30000 });
@@ -33,7 +36,7 @@ export default function Earnings() {
               <div>
                 <span>Today</span>
                 <strong>{peso(data.today.earnings)}</strong>
-                <small>{plural(data.today.deliveries, 'delivery', 'deliveries')} · {km(data.today.km)}</small>
+                <small>{plural(data.today.deliveries, 'delivery', 'deliveries')}{data.today.paidFails > 0 ? ` · ${plural(data.today.paidFails, 'paid failed trip')}` : ''} · {km(data.today.km)}</small>
               </div>
               <span className="earn-panel__week"><TrendUp size={16} weight="bold" /> {peso(data.week.earnings)} this week</span>
             </div>
@@ -49,9 +52,9 @@ export default function Earnings() {
           </section>
 
           <StatStrip items={[
-            { label: '7 days', value: peso(data.week.earnings), sub: plural(data.week.deliveries, 'trip') },
-            { label: 'This month', value: peso(data.month.earnings), sub: plural(data.month.deliveries, 'trip') },
-            { label: 'All time', value: peso(data.all.earnings), sub: plural(data.all.deliveries, 'trip') },
+            { label: '7 days', value: peso(data.week.earnings), sub: trips(data.week) },
+            { label: 'This month', value: peso(data.month.earnings), sub: trips(data.month) },
+            { label: 'All time', value: peso(data.all.earnings), sub: trips(data.all) },
           ]} />
 
           <section className="section">
@@ -61,10 +64,12 @@ export default function Earnings() {
                 {data.recent.map((j) => (
                   <li key={j.id}>
                     <Link to={`/rider/jobs/${j.id}`}>
-                      <span className={`earn-list__icon${j.promo ? ' earn-list__icon--pink' : ''}`}>{j.promo ? <Gift size={20} weight="fill" /> : <Receipt size={20} weight="fill" />}</span>
+                      <span className={`earn-list__icon${j.failPaid ? ' earn-list__icon--amber' : j.promo ? ' earn-list__icon--pink' : ''}`}>
+                        {j.failPaid ? <ArrowUUpLeft size={20} weight="bold" /> : j.promo ? <Gift size={20} weight="fill" /> : <Receipt size={20} weight="fill" />}
+                      </span>
                       <div>
                         <strong>{j.pickupBarangay} → {j.dropoffBarangay}</strong>
-                        <small className="muted">{dateTime(j.deliveredAt)} · {j.promo
+                        <small className="muted">{dateTime(j.doneAt || j.deliveredAt)} · {j.failPaid ? 'Failed trip · paid · ' : ''}{j.promo
                           ? `free delivery${j.listFee ? ` (usually ${peso(j.listFee)})` : ''} · paid by MoorMove`
                           : `fare ${peso(j.fee)} − commission ${peso(j.platformCut, { cents: true })}`}</small>
                       </div>

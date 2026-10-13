@@ -87,6 +87,16 @@ const partnerView = async (job) => {
     cancelReason: job.cancelReason,
     failedAt: job.failedAt,
     failReason: job.failReason,
+    // Why it failed (lib/failReasons.js: BUYER_REFUSED, BUYER_UNREACHABLE,
+    // WRONG_ADDRESS, PARCEL_DAMAGED, WRONG_ITEM, RIDER_PROBLEM, OTHER; null on
+    // older jobs), whether it was the buyer's fault, and whether the rider is
+    // paid for the failed trip (set once the parcel is back).
+    failCode: job.failCode || null,
+    buyerFault: Boolean(job.buyerFault),
+    failPaid: Boolean(job.failPaid),
+    // A failed delivery's parcel: RETURNING while the rider brings it back,
+    // returnedAt once the shop (or MoorMove's staff) confirmed it is back.
+    returnedAt: job.returnedAt || null,
     updatedAt: job.updatedAt,
     rider: r && {
       name: r.name,
@@ -120,7 +130,7 @@ const uncoveredPlace = async (pickupPlace, dropoffPlace) => {
 
 /**
  * What a delivery for an E-MOORM order would cost, and whether MoorMove can
- * take it: { available, reason, vehicleType, distanceKm, distanceSource, fee, town, dropoffTown }.
+ * take it: { available, reason, vehicleType, distanceKm, distanceSource, minutes, fee, town, dropoffTown }.
  * Optional: dropoffTownId (the buyer's town; default the pickup's) and
  * pickup.barangay / dropoff.barangay. Without a rider whose area has both
  * ends it is unavailable ("No MoorMove rider delivers to Lalud, Calapan City
@@ -143,6 +153,8 @@ const quoteOrder = async ({ townId, dropoffTownId, packageSize, pickup, dropoff 
     distanceKm: price.distanceKm,
     // ROAD (km by road) or ESTIMATE (straight line × the road factor).
     distanceSource: price.distanceSource,
+    // The ride from the shop to the buyer, in minutes (by road, or at town speed).
+    minutes: Number.isFinite(price.minutes) ? price.minutes : null,
     // A free-delivery promo: the buyer pays nothing; listFee is the usual fee.
     fee: promo ? 0 : price.fee,
     listFee: price.fee,

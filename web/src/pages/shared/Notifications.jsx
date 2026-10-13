@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Bell, Checks, Gift, IdentificationCard, Package, Star, Wallet } from '@phosphor-icons/react';
+import { ArrowUUpLeft, Bell, Checks, Gift, IdentificationCard, Package, Star, Storefront, Wallet } from '@phosphor-icons/react';
 import api from '../../api';
 import { useAuth } from '../../auth';
 import { useLive } from '../../lib/hooks';
@@ -13,6 +13,13 @@ const KINDS = {
   star: { icon: Star, tone: 'amber' },
   // Free-delivery promos running where the rider works.
   promo: { icon: Gift, tone: 'pink' },
+};
+
+// A failed E-MOORM delivery's parcel: on its way back to the shop, then back with it.
+const kindOf = (n) => {
+  if (n.kind === 'job' && /^Return the parcel/i.test(n.title || '')) return { icon: ArrowUUpLeft, tone: 'amber' };
+  if (n.kind === 'job' && /parcel back|marked returned/i.test(n.title || '')) return { icon: Storefront, tone: 'green' };
+  return KINDS[n.kind] || { icon: Bell, tone: 'grey' };
 };
 
 const dayOf = (d) => {
@@ -67,7 +74,7 @@ export default function Notifications() {
           <h2 className="notif-group__title">{g.label}</h2>
           <ul className="section notif-list">
             {g.items.map((n) => {
-              const kind = KINDS[n.kind] || { icon: Bell, tone: 'grey' };
+              const kind = kindOf(n);
               const Icon = kind.icon;
               return (
                 <li key={n.id}>

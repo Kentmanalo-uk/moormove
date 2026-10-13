@@ -80,14 +80,14 @@ router.get('/status', async (req, res) => {
 /** What a rider would cost for an order, or why MoorMove can't take it. */
 router.post('/quote', async (req, res) => {
   const {
-    available, reason, vehicleType, distanceKm, distanceSource, fee, listFee, promo,
+    available, reason, vehicleType, distanceKm, distanceSource, minutes, fee, listFee, promo,
   } = await partner.quoteOrder(req.body || {});
   // promo: a free-delivery promo runs (fee 0, listFee the usual fee); book
   // the job with fee 0 and its promoId.
   res.json({
     success: true,
     data: {
-      available, reason, vehicleType, distanceKm, distanceSource, fee, listFee, promo: available ? promo : null,
+      available, reason, vehicleType, distanceKm, distanceSource, minutes, fee, listFee, promo: available ? promo : null,
     },
   });
 });
@@ -144,6 +144,29 @@ router.post('/jobs/:id/cod-returned', async (req, res) => {
     }
   }
   res.json({ success: true, data: await partner.partnerView(fresh) });
+});
+
+/**
+ * The shop confirmed a failed delivery's parcel is back with it: the return
+ * trip ends (RETURNING -> FAILED with returnedAt) and the rider is free for
+ * the next job. Asking twice is fine. A trip that failed by the buyer's fault
+ * pays the rider (failPaid); any other failed trip earns nothing.
+ */
+router.post('/jobs/:id/parcel-returned', async (req, res) => {
+  const job = await partner.findOrderJob(req.params.id);
+  if (job.returnedAt) return res.json({ success: true, data: await partner.partnerView(job) });
+  if (job.status !== 'RETURNING') throw new ApiError("This delivery's parcel isn't on its way back", 409);
+  const updated = await jobs.closeReturn(job, { actorId: null, note: 'The shop has the parcel back (confirmed on E-MOORM)' });
+  if (job.rider) {
+    await notify(job.rider.userId, {
+      kind: 'job',
+      title: 'The shop has the parcel back',
+      body: `${job.pickupName} confirmed the parcel for ${job.externalCode ? `order #${job.externalCode}` : job.code} is back.${
+        updated.failPaid ? ` You earn ₱${Number(updated.riderEarning).toFixed(0)} for this trip.` : ''} You can take new deliveries.`,
+      link: `/rider/jobs/${job.id}`,
+    });
+  }
+  res.json({ success: true, data: await partner.partnerView(updated) });
 });
 
 /** A proof photo (pickup or delivery) of an E-MOORM job. */

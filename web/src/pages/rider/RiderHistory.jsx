@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { useLive } from '../../lib/hooks';
 import { dateTime, peso, plural } from '../../lib/format';
-import { DeliveryCard, isFree, townHop } from '../../components/delivery';
+import { DeliveryCard, isFree, returnedText, townHop } from '../../components/delivery';
 import { Empty, Loading, PageHead, StatStrip } from '../../components/ui';
 
 const TABS = [['completed', 'Delivered'], ['other', 'Cancelled & failed']];
@@ -12,6 +12,9 @@ export default function RiderHistory() {
   const { data, loading, error } = useLive('/rider/jobs', { params: { tab } });
   const delivered = (data || []).filter((j) => j.status === 'DELIVERED');
   const total = delivered.reduce((s, j) => s + j.riderEarning, 0);
+  // Failed trips the rider is still paid for (the buyer's fault, E-MOORM orders).
+  const paidFails = (data || []).filter((j) => j.failPaid);
+  const failedEarned = paidFails.reduce((s, j) => s + j.riderEarning, 0);
 
   return (
     <>
@@ -36,11 +39,12 @@ export default function RiderHistory() {
         <div className="card-grid">
           {data.map((j) => (
             <DeliveryCard key={j.id} job={j} to={`/rider/jobs/${j.id}`}
-              money={j.status === 'DELIVERED' ? `+${peso(j.riderEarning)}` : '—'} extra={`${isFree(j) ? 'Free delivery, paid by MoorMove · ' : ''}${townHop(j) ? `${townHop(j).join(' → ')} · ` : ''}${j.externalCode ? `E-MOORM #${j.externalCode} · ` : ''}${dateTime(j.deliveredAt || j.updatedAt)}`} />
+              money={j.status === 'DELIVERED' || j.failPaid ? `+${peso(j.riderEarning)}` : '—'} extra={`${j.failPaid ? 'Failed trip · paid · ' : ''}${isFree(j) && !j.failPaid ? 'Free delivery, paid by MoorMove · ' : ''}${townHop(j) ? `${townHop(j).join(' → ')} · ` : ''}${j.externalCode ? `E-MOORM #${j.externalCode} · ` : ''}${returnedText(j) || dateTime(j.deliveredAt || j.failedAt || j.updatedAt)}`} />
           ))}
         </div>
       )}
       {tab === 'completed' && data?.length > 0 && <p className="list-foot">{plural(data.length, 'delivery', 'deliveries')}</p>}
+      {tab === 'other' && paidFails.length > 0 && <p className="list-foot">{plural(paidFails.length, 'paid failed trip')} · you earned {peso(failedEarned)}</p>}
     </>
   );
 }

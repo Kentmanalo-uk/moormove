@@ -10,8 +10,11 @@ import { Empty, JobPill, Loading, PageHead, VehicleIcon } from '../../components
 // promo/listFee when the API sends them; otherwise a fare of 0 means free.)
 const free = (j) => Boolean(j.promo) || Number(j.fee) === 0;
 
+// A failed or returning trip that was the buyer's fault (the buyer pays for it).
+const buyerFault = (j) => j.buyerFault && ['FAILED', 'RETURNING'].includes(j.status);
+
 const SOURCES = [['', 'All sources'], ['EMOORM', 'E-MOORM orders'], ['MOORMOVE', 'Booked on MoorMove']];
-const TABS = [['searching', 'Finding rider'], ['active', 'On the way'], ['delivered', 'Delivered'], ['problems', 'Cancelled & failed'], ['all', 'All']];
+const TABS = [['searching', 'Finding rider'], ['active', 'On the way'], ['delivered', 'Delivered'], ['problems', 'Problems'], ['all', 'All']];
 
 export default function AdminDeliveries() {
   const navigate = useNavigate();
@@ -71,7 +74,11 @@ export default function AdminDeliveries() {
                     <td><MiniRoute from={j.pickupBarangay} to={j.dropoffBarangay} /></td>
                     <td>{townHop(j) ? <TownHop job={j} /> : j.town}</td>
                     <td>{j.riderName || <span className="muted">—</span>}</td>
-                    <td><JobPill status={j.status} /></td>
+                    <td>
+                      {buyerFault(j)
+                        ? <span className="status-tags"><JobPill status={j.status} /><span className="pill pill--red fault-tag">Buyer&apos;s fault</span></span>
+                        : <JobPill status={j.status} />}
+                    </td>
                     <td className="table__num">
                       {free(j)
                         ? <><b className="tone-pink free-fare"><Gift size={14} weight="fill" /> Free</b>{j.listFee ? <small className="muted">usually {peso(j.listFee)}</small> : null}</>
@@ -87,7 +94,7 @@ export default function AdminDeliveries() {
           <div className="card-grid only-narrow">
             {data.jobs.map((j) => (
               <DeliveryCard key={j.id} job={j} to={`/admin/deliveries/${j.id}`} money={free(j) ? <span className="tone-pink">Free</span> : peso(j.fee)}
-                extra={`${j.code}${j.externalCode ? ` · E-MOORM #${j.externalCode}` : ''}${townHop(j) ? ` · ${townHop(j).join(' → ')}` : ''} · ${j.riderName || ago(j.createdAt)}`} />
+                extra={<>{buyerFault(j) && <><span className="pill pill--red fault-tag">Buyer&apos;s fault</span>{' '}</>}{`${j.code}${j.externalCode ? ` · E-MOORM #${j.externalCode}` : ''}${townHop(j) ? ` · ${townHop(j).join(' → ')}` : ''} · ${j.riderName || ago(j.createdAt)}`}</>} />
             ))}
           </div>
         </>

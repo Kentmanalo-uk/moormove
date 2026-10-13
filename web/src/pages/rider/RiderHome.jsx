@@ -183,7 +183,7 @@ export default function RiderHome() {
     >
       <StatStrip items={[
         { label: 'Today', value: peso(data.today.earnings), to: '/rider/earnings', tone: 'green' },
-        { label: 'Trips today', value: data.today.deliveries },
+        { label: 'Trips today', value: data.today.deliveries, sub: data.today.paidFails > 0 ? `+ ${data.today.paidFails} failed, paid` : undefined },
         { label: 'Rating', value: data.rating ?? '—', sub: data.ratingCount ? plural(data.ratingCount, 'rating') : 'No ratings yet' },
       ]} />
 
@@ -222,13 +222,23 @@ export default function RiderHome() {
         <Link to={`/rider/jobs/${active.id}`} className="active-job">
           <div className="active-job__top">
             <span className="live-dot live-dot--white" />
-            <strong>{JOB_STATUS[active.status].rider}</strong>
-            <span className="active-job__earn">{peso(active.riderEarning)}</span>
+            <strong>{active.returnTo?.task || JOB_STATUS[active.status].rider}</strong>
+            {/* A parcel on its way back is a failed trip: nothing to earn. */}
+            {!active.returnTo && <span className="active-job__earn">{peso(active.riderEarning)}</span>}
           </div>
           {active.source === 'EMOORM' && <OrderBadge job={active} className="pill--white" />}
-          {isFree(active) && <FreeChip job={active} className="pill--white" />}
-          <MiniRoute light from={`${active.pickup.name} · ${active.pickup.barangay}`} to={`${active.dropoff.name} · ${active.dropoff.barangay}`} />
-          <Progress status={active.status} />
+          {!active.returnTo && isFree(active) && <FreeChip job={active} className="pill--white" />}
+          {active.returnTo ? (
+            <>
+              <MiniRoute light from={`${active.dropoff.name} · ${active.dropoff.barangay}`} to={`${active.returnTo.name} · ${active.returnTo.barangay}`} />
+              <span className="active-job__note">The shop will confirm once they have it. Then you can take new deliveries.</span>
+            </>
+          ) : (
+            <>
+              <MiniRoute light from={`${active.pickup.name} · ${active.pickup.barangay}`} to={`${active.dropoff.name} · ${active.dropoff.barangay}`} />
+              <Progress status={active.status} />
+            </>
+          )}
           <span className="active-job__go">Open delivery <ArrowRight size={16} weight="bold" /></span>
         </Link>
       )}

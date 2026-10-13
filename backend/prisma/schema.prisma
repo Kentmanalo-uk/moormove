@@ -183,8 +183,13 @@ enum JobStatus {
   AT_DROPOFF
   DELIVERED
   CANCELLED
-  /// Picked up but could not be delivered (reason in failReason).
+  /// Picked up but could not be delivered (reason in failReason): the parcel
+  /// goes back to the shop, or the rider never had it.
   FAILED
+  /// E-MOORM orders: picked up but could not be delivered; the rider is
+  /// bringing the parcel back to the shop. Becomes FAILED (with returnedAt)
+  /// once the shop confirms it has the parcel.
+  RETURNING
 }
 
 enum PackageSize {
@@ -294,6 +299,20 @@ model Job {
   cancelReason     String?   @map("cancel_reason") @db.VarChar(255)
   failedAt         DateTime? @map("failed_at")
   failReason       String?   @map("fail_reason") @db.VarChar(255)
+  /// A failed delivery's parcel is back with the shop (the shop, or MoorMove's
+  /// staff, confirmed it).
+  returnedAt       DateTime? @map("returned_at")
+  /// Why it failed, from the rider's list (lib/failReasons.js): BUYER_REFUSED,
+  /// BUYER_UNREACHABLE, WRONG_ADDRESS, PARCEL_DAMAGED, WRONG_ITEM,
+  /// RIDER_PROBLEM or OTHER. Null on older jobs.
+  failCode         String?   @map("fail_code") @db.VarChar(20)
+  /// The failure was the buyer's (recipient's) fault: refused, not there, or
+  /// a wrong address or pin.
+  buyerFault       Boolean   @default(false) @map("buyer_fault")
+  /// A failed E-MOORM trip the rider is paid for (the buyer's fault), set
+  /// when the parcel is back (FAILED with returnedAt): it counts like a
+  /// delivered job in the rider's earnings, commission and settlements.
+  failPaid         Boolean   @default(false) @map("fail_paid")
 
   // The customer's rating of the rider
   rating        Int?      @db.TinyInt

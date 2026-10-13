@@ -12,7 +12,10 @@ const { text, phone, isPhone, failIf } = require('./check');
 const areas = require('./areas');
 const promos = require('./promos');
 
-const ACTIVE = ['ACCEPTED', 'AT_PICKUP', 'PICKED_UP', 'AT_DROPOFF'];
+// RETURNING: an E-MOORM parcel the rider couldn't deliver, on its way back to
+// the shop. It is still the rider's job (their task: "Return the parcel to
+// <shop>") until the shop confirms it has the parcel.
+const ACTIVE = ['ACCEPTED', 'AT_PICKUP', 'PICKED_UP', 'AT_DROPOFF', 'RETURNING'];
 const OPEN = ['SEARCHING', ...ACTIVE];
 const DONE = ['DELIVERED', 'CANCELLED', 'FAILED'];
 const VEHICLES = ['TRICYCLE', 'MOTORCYCLE', 'BICYCLE'];
@@ -25,6 +28,46 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newCode = () => `MM-${Array.from(crypto.randomBytes(6), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('')}`;
 
 const num = (d) => (d === null || d === undefined ? null : Number(d));
+
+/**
+ * Jobs that pay their rider, as a query: delivered ones, and failed E-MOORM
+ * trips that were the buyer's fault (failPaid, once the parcel is back).
+ * With `from`, those that ended since then (deliveredAt or returnedAt).
+ * Earnings, commission owed and settlements all count these.
+ */
+const paidWhere = (from = null) => ({
+  OR: [
+    { status: 'DELIVERED', ...(from ? { deliveredAt: { gte: from } } : {}) },
+    { status: 'FAILED', failPaid: true, ...(from ? { returnedAt: { gte: from } } : {}) },
+  ],
+});
+
+/** When a paying job ended: delivered, or (a paid failed trip) the parcel back. */
+const doneAt = (job) => job.deliveredAt || job.returnedAt || null;
+
+/**
+ * What a failed E-MOORM trip means for the rider's pay (RETURNING, or FAILED
+ * after pickup); null otherwise. The buyer's fault: the rider earns as for a
+ * delivery: from the fee the shop paid at pickup (kept), from the shop when
+ * the parcel is back (shopPays, cash on delivery), or from MoorMove
+ * (moormovePays, a free-delivery promo). Not the buyer's fault: no pay, and
+ * a fee the shop paid at pickup goes back to the shop (giveBack).
+ */
+const tripPay = (job) => {
+  if (job.source !== 'EMOORM' || !['RETURNING', 'FAILED'].includes(job.status) || !job.failedAt) return null;
+  const fee = num(job.fee) || 0;
+  const paid = Boolean(job.buyerFault);
+  const free = num(job.platformCut) < 0;
+  const byShop = job.feePaidBy === 'SENDER' && fee > 0;
+  return {
+    paid,
+    earning: num(job.riderEarning),
+    shopPays: paid && !free && job.feePaidBy === 'RECIPIENT' && fee > 0 ? fee : 0,
+    moormovePays: paid && free ? -num(job.platformCut) : 0,
+    giveBack: !paid && byShop ? fee : 0,
+    kept: paid && byShop ? fee : 0,
+  };
+};
 
 /** Read and check a booking form. */
 const readBooking = (body, settings) => {
@@ -267,6 +310,25 @@ const jobView = async (job, viewer) => {
     cancelReason: job.cancelReason,
     failedAt: job.failedAt,
     failReason: job.failReason,
+    // Why, from the rider's list (lib/failReasons.js), and whether it was the
+    // buyer's fault; failPaid: a failed trip the rider is paid for.
+    failCode: job.failCode || null,
+    buyerFault: Boolean(job.buyerFault),
+    failPaid: Boolean(job.failPaid),
+    // A failed E-MOORM delivery: RETURNING until the shop confirms the parcel
+    // is back (returnedAt). The rider's task meanwhile is returnTo.
+    returnedAt: job.returnedAt || null,
+    returnTo: job.status === 'RETURNING'
+      ? {
+        task: `Return the parcel to ${job.pickupName}`,
+        name: job.pickupName,
+        phone: preview ? null : job.pickupPhone,
+        address: job.pickupAddress,
+        barangay: job.pickupBarangay,
+        lat: job.pickupLat,
+        lng: job.pickupLng,
+      }
+      : null,
     rating: job.rating,
     ratingComment: job.ratingComment,
     createdAt: job.createdAt,
@@ -280,6 +342,8 @@ const jobView = async (job, viewer) => {
     view.platformCut = num(job.platformCut);
     // A free delivery: MoorMove pays the rider's earning (platformCut is minus it).
     view.moormovePays = num(job.platformCut) < 0 ? -num(job.platformCut) : 0;
+    // A failed E-MOORM trip: whether it still pays, and who pays or gets paid back.
+    view.tripPay = tripPay(job);
   }
   if (isAdmin) {
     view.customer = job.customer;
@@ -320,6 +384,20 @@ const move = async (job, { from, to, data = {}, actorId, note = null, lat = null
   return fresh;
 };
 
+/**
+ * A returning parcel is back with the shop: RETURNING -> FAILED with
+ * returnedAt. The buyer's fault: the trip pays the rider like a delivery
+ * (failPaid); otherwise it earns nothing.
+ */
+const closeReturn = (job, { actorId = null, note = 'The parcel is back with the shop' } = {}) => move(job, {
+  from: ['RETURNING'],
+  to: 'FAILED',
+  data: { returnedAt: new Date(), failPaid: job.source === 'EMOORM' && Boolean(job.buyerFault) },
+  actorId,
+  note,
+  conflict: "This delivery's parcel isn't on its way back",
+});
+
 const customerLink = (job) => `/deliveries/${job.id}`;
 
 /** Tell the customer (if any) about their delivery. */
@@ -334,6 +412,7 @@ const failAlert = (job, reason) => notifyAdmins({
 
 module.exports = {
   ACTIVE, OPEN, DONE, VEHICLES, SIZES,
-  createJob, jobView, findForViewer, move, jobInclude, riderSummary, tellCustomer, failAlert, num,
+  createJob, jobView, findForViewer, move, closeReturn, jobInclude, riderSummary, tellCustomer, failAlert, num,
+  paidWhere, doneAt, tripPay,
   canTake, fitsVehicle, vehiclesFor, takeableBy, alertRiders, newCode,
 };

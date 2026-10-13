@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { CheckCircle, Phone, Storefront } from '@phosphor-icons/react';
+import { ArrowUUpLeft, CheckCircle, Phone, Storefront } from '@phosphor-icons/react';
 import api from '../../api';
 import { useLive } from '../../lib/hooks';
-import { ACTIVE, ago, dateTime, JOB_STATUS, peso } from '../../lib/format';
+import { ACTIVE, ago, dateTime, failReasonOf, JOB_STATUS, peso } from '../../lib/format';
 import { RouteMap } from '../../components/maps';
 import {
-  FreeChip, isFree, MoneyBlock, OrderBadge, orderPayText, Progress, RiderCard, RouteBlock, StatusBlock, Timeline, TownHop,
+  failedTrip, FreeChip, isFree, MoneyBlock, OrderBadge, orderPayText, Progress, returnedText, RiderCard, RouteBlock, StatusBlock, Timeline, TownHop,
+  tripEarning, TripPayRows, tripPaid,
 } from '../../components/delivery';
 import { Avatar, BackBar, Empty, Field, JobPill, Loading, MapPage, PhotoGrid, Sheet, Stars, useToast } from '../../components/ui';
 
@@ -70,12 +71,15 @@ export default function AdminDelivery() {
   const toast = useToast();
   const { data: job, error, setData } = useLive(`/admin/jobs/${id}`, { every: 10000 });
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (error) return <><BackBar title="Delivery" /><p className="alert">{error}</p></>;
   if (!job) return <><BackBar title="Delivery" /><Loading /></>;
-  const open = ['SEARCHING', ...ACTIVE].includes(job.status);
+  // A parcel on its way back to the shop is closed with "Mark returned", not cancelled.
+  const returning = job.status === 'RETURNING';
+  const open = ['SEARCHING', ...ACTIVE].includes(job.status) && !returning;
   const order = job.source === 'EMOORM';
   const riderPos = ACTIVE.includes(job.status) && job.rider?.lat ? { lat: job.rider.lat, lng: job.rider.lng } : null;
 
@@ -92,6 +96,34 @@ export default function AdminDelivery() {
     }
   };
 
+  const markReturned = async () => {
+    setBusy(true);
+    try {
+      setData(await api.post(`/admin/jobs/${job.id}/returned`));
+      setReturnOpen(false);
+      toast('Marked returned');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Not delivered: the reason picked, the rider's note (after " · " in failReason) and who pays for the trip.
+  const failed = failedTrip(job);
+  const failLabel = failReasonOf(job.failCode)?.label;
+  const failNote = failLabel && job.failReason?.includes(' · ') ? job.failReason.slice(job.failReason.indexOf(' · ') + 3) : '';
+  const paidTrip = failed && tripPaid(job);
+
+  const statusText = [
+    job.town.name,
+    `booked ${dateTime(job.createdAt)}`,
+    job.cancelReason,
+    job.failReason,
+    returning && job.returnTo ? `the rider is bringing the parcel back to ${job.returnTo.name}` : '',
+    returnedText(job),
+  ].filter(Boolean).join(' · ');
+
   return (
     <MapPage title={job.code} back="/admin/deliveries" actions={<JobPill status={job.status} />}
       map={<RouteMap fill pickup={job.pickup} dropoff={job.dropoff} rider={riderPos} searching={job.status === 'SEARCHING'} />}>
@@ -99,14 +131,30 @@ export default function AdminDelivery() {
           {isFree(job) && <FreeChip job={job} line admin />}
           <TownHop job={job} />
           <section className="card status-card">
-            <StatusBlock status={job.status} title={JOB_STATUS[job.status].label}
-              text={`${job.town.name} · booked ${dateTime(job.createdAt)}${job.cancelReason ? ` · ${job.cancelReason}` : ''}${job.failReason ? ` · ${job.failReason}` : ''}`} />
+            <StatusBlock status={job.status} title={JOB_STATUS[job.status]?.label || job.status} text={statusText} />
             <Progress status={job.status} />
           </section>
           {job.rider && (
             <section className="card">
               <RiderCard rider={job.rider} />
               <Link to={`/admin/riders/${job.rider.id}`} className="card-link">Rider profile</Link>
+            </section>
+          )}
+          {failed && (job.failReason || failLabel) && (
+            <section className="section">
+              <div className="section__head">
+                <h2>Why it wasn&apos;t delivered</h2>
+                {job.failCode && <span className={`pill ${job.buyerFault ? 'pill--red' : 'pill--grey'}`}>{job.buyerFault ? "Buyer's fault" : "Not the buyer's fault"}</span>}
+              </div>
+              <div className="section__body">
+                <dl className="receipt">
+                  <div className="kv"><dt>Reason</dt><dd>{failLabel || job.failReason}</dd></div>
+                  {failNote && <div className="kv"><dt>Rider&apos;s note</dt><dd>{failNote}</dd></div>}
+                  {job.failedAt && <div className="kv"><dt>Reported</dt><dd>{dateTime(job.failedAt)}</dd></div>}
+                  <div className="kv"><dt>Rider paid for the trip</dt><dd className={paidTrip ? 'tone-green' : ''}>{paidTrip ? `Yes, ${peso(tripEarning(job), { cents: true })}` : 'No'}</dd></div>
+                  <TripPayRows pay={job.tripPay} />
+                </dl>
+              </div>
             </section>
           )}
           {job.status === 'SEARCHING' && <AssignRider job={job} onAssigned={setData} />}
@@ -134,8 +182,8 @@ export default function AdminDelivery() {
               {order && <p className="small muted order-pay">For the rider: {orderPayText(job)}</p>}
               {/* Free deliveries: the fare and what MoorMove pays the rider are in the receipt above. */}
               {job.platformCut >= 0 && <div className="kv"><dt>MoorMove commission</dt><dd>{peso(job.platformCut, { cents: true })}</dd></div>}
-              <div className="kv"><dt>Rider earns</dt><dd>{peso(job.riderEarning, { cents: true })}</dd></div>
-              {job.status === 'DELIVERED' && <div className="kv"><dt>{job.platformCut < 0 ? 'Rider paid by MoorMove' : 'Commission paid'}</dt><dd>{job.settlementId ? 'Yes' : 'Not yet'}</dd></div>}
+              <div className="kv"><dt>Rider earns</dt><dd>{failed && !paidTrip ? 'No pay (not delivered)' : peso(job.riderEarning, { cents: true })}</dd></div>
+              {(job.status === 'DELIVERED' || job.failPaid) && <div className="kv"><dt>{job.platformCut < 0 ? 'Rider paid by MoorMove' : 'Commission paid'}</dt><dd>{job.settlementId ? 'Yes' : 'Not yet'}</dd></div>}
               {job.codAmount > 0 && job.status === 'DELIVERED' && <div className="kv"><dt>{order ? 'COD back to the shop' : 'COD back to sender'}</dt><dd>{job.codReturnedAt ? `Confirmed ${dateTime(job.codReturnedAt)}` : 'Not confirmed yet'}</dd></div>}
             </div>
           </section>
@@ -156,7 +204,25 @@ export default function AdminDelivery() {
             <div className="section__head"><h2>Timeline</h2></div>
             <div className="section__body"><Timeline events={job.events} /></div>
           </section>
+          {returning && (
+            <>
+              <p className="alert alert--warn" style={{ marginTop: 12 }}>
+                <ArrowUUpLeft size={20} weight="bold" />
+                <span>The shop confirms on E-MOORM once it has the parcel. Mark it returned only if the shop has it but didn't confirm.</span>
+              </p>
+              <button type="button" className="btn btn--primary btn--block" onClick={() => setReturnOpen(true)}>Mark returned</button>
+            </>
+          )}
           {open && <button type="button" className="btn btn--danger btn--block" style={{ marginTop: 12 }} onClick={() => setCancelOpen(true)}>Cancel delivery</button>}
+
+      <Sheet open={returnOpen} onClose={() => setReturnOpen(false)} label="Mark returned">
+        <h2>Parcel back with {job.returnTo?.name || job.pickup.name}?</h2>
+        <p>The delivery closes as not delivered and the rider can take new deliveries.{order ? ' E-MOORM is told.' : ''}</p>
+        <div className="btn-row">
+          <button type="button" className="btn btn--grey" onClick={() => setReturnOpen(false)}>Back</button>
+          <button type="button" className="btn btn--primary" onClick={markReturned} disabled={busy}>{busy ? 'Saving…' : 'Mark returned'}</button>
+        </div>
+      </Sheet>
 
       <Sheet open={cancelOpen} onClose={() => setCancelOpen(false)} label="Cancel delivery">
         <h2>Cancel {job.code}?</h2>

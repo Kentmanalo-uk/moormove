@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Camera, CheckCircle, Coins, Gift, MapPin, MapPinArea, Package, WarningCircle } from '@phosphor-icons/react';
+import {
+  ArrowUUpLeft, Camera, ChatText, CheckCircle, Coins, Gift, MapPin, MapPinArea, NavigationArrow, Package, Phone, Storefront, WarningCircle,
+} from '@phosphor-icons/react';
 import api from '../../api';
 import { useLive, useShareLocation } from '../../lib/hooks';
-import { ACTIVE, dateTime, JOB_STATUS, km, peso, SIZES } from '../../lib/format';
+import {
+  ACTIVE, dateTime, FAIL_REASONS, failReasonOf, JOB_STATUS, km, mapsLink, peso, SIZES, smsLink, telLink,
+} from '../../lib/format';
 import { RouteMap } from '../../components/maps';
 import {
-  buyerPays, FreeChip, isFree, moormovePays, MoneyBlock, OrderBadge, orderPayText, Progress, RouteBlock, StatusBlock, Timeline, TownHop,
+  buyerPays, FreeChip, isFree, moormovePays, MoneyBlock, OrderBadge, orderPayText, place, Progress, returnedText, RouteBlock, StatusBlock, Timeline,
+  TownHop, tripEarning, tripPaid,
 } from '../../components/delivery';
 import { BackBar, Field, Loading, MapPage, PhotoField, PhotoGrid, Sheet, Stars, useToast } from '../../components/ui';
 
@@ -19,7 +24,13 @@ const NEXT = {
 };
 
 const GIVE_BACK = ['Vehicle trouble', 'Emergency', "Can't find the pickup", 'Sender not answering', 'Package too big for my vehicle'];
-const CANT_DELIVER = ['Recipient not answering', 'Recipient refused the package', 'Wrong address', 'Recipient did not pay', 'Package damaged'];
+
+/** "Buyer refused the parcel · Oct 12, 3:40 PM · Buyer's fault": why it wasn't delivered. */
+const failText = (job) => [
+  job.failReason || failReasonOf(job.failCode)?.label,
+  job.failedAt && dateTime(job.failedAt),
+  job.failCode && (job.buyerFault ? "Buyer's fault" : "Not the buyer's fault"),
+].filter(Boolean).join(' · ');
 
 function StepPanel({ job, onDone, position }) {
   const toast = useToast();
@@ -98,6 +109,60 @@ function StepPanel({ job, onDone, position }) {
   );
 }
 
+/**
+ * A failed E-MOORM delivery: the rider brings the parcel back to the shop.
+ * There is no step to tap; the job ends when the shop confirms on E-MOORM.
+ */
+function ReturnTask({ job }) {
+  const to = job.returnTo;
+  const mapped = Number.isFinite(to.lat) && Number.isFinite(to.lng);
+  // E-MOORM orders: what this failed trip pays, and who pays it.
+  const pay = job.tripPay;
+  return (
+    <section className="card step-panel">
+      <div className="step-panel__head">
+        <span className="step-panel__icon step-panel__icon--amber"><ArrowUUpLeft size={24} weight="bold" /></span>
+        <div>
+          <small>Your task</small>
+          <h2>{to.task}</h2>
+        </div>
+      </div>
+      <ol className="route">
+        <li className="route__stop">
+          <span className="route__dot route__dot--a">A</span>
+          <div className="route__text">
+            <small className="route__label">Shop</small>
+            <strong>{to.name}</strong>
+            <span>{place(to)}</span>
+            {(to.phone || mapped) && (
+              <div className="route__actions">
+                {to.phone && <a className="chip-btn" href={telLink(to.phone)}><Phone size={16} weight="fill" /> Call</a>}
+                {to.phone && <a className="chip-btn" href={smsLink(to.phone)}><ChatText size={16} weight="fill" /> Text</a>}
+                {mapped && <a className="chip-btn chip-btn--blue" href={mapsLink(to.lat, to.lng)} target="_blank" rel="noreferrer"><NavigationArrow size={16} weight="fill" /> Directions</a>}
+              </div>
+            )}
+          </div>
+        </li>
+      </ol>
+      {pay && (
+        <div className={`collect trip-pay${pay.paid ? ' trip-pay--paid' : ''}`}>
+          <Coins size={22} weight="fill" />
+          <div>
+            <p>{pay.paid ? <>You still earn <strong>{peso(pay.earning)}</strong> for this trip</> : 'No pay for this trip'}</p>
+            {pay.shopPays > 0 && <p>The shop pays you <strong>{peso(pay.shopPays)}</strong> when you return the parcel</p>}
+            {pay.moormovePays > 0 && <p>MoorMove pays you <strong>{peso(pay.moormovePays)}</strong></p>}
+            {pay.giveBack > 0 && <p>Give back the <strong>{peso(pay.giveBack)}</strong> fee the shop paid you</p>}
+          </div>
+        </div>
+      )}
+      <p className="alert alert--info return-note">
+        <Storefront size={20} weight="fill" />
+        <span>The shop will confirm once they have it. Then you can take new deliveries.</span>
+      </p>
+    </section>
+  );
+}
+
 export default function RiderJob() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -108,6 +173,10 @@ export default function RiderJob() {
   const { position } = useShareLocation(active);
   const [problem, setProblem] = useState(false);
   const [reason, setReason] = useState('');
+  // Can't deliver: one of FAIL_REASONS, and a note (needed for OTHER).
+  const [reasonCode, setReasonCode] = useState('');
+  const [note, setNote] = useState('');
+  const [noteError, setNoteError] = useState('');
   const [busy, setBusy] = useState(false);
   const [outside, setOutside] = useState('');
 
@@ -132,20 +201,34 @@ export default function RiderJob() {
   };
 
   const beforePickup = ['ACCEPTED', 'AT_PICKUP'].includes(job.status);
-  const reasons = beforePickup ? GIVE_BACK : CANT_DELIVER;
+  const noteNeeded = reasonCode === 'OTHER';
+  const canReport = beforePickup ? Boolean(reason.trim()) : Boolean(reasonCode) && (!noteNeeded || Boolean(note.trim()));
+  const openProblem = () => {
+    setReason(GIVE_BACK[0]);
+    setReasonCode('');
+    setNote('');
+    setNoteError('');
+    setProblem(true);
+  };
   const report = async () => {
     setBusy(true);
+    setNoteError('');
     try {
       if (beforePickup) {
         await api.post(`/rider/jobs/${job.id}/release`, { reason });
         toast('Delivery given back');
         navigate('/rider', { replace: true });
       } else {
-        setData(await api.post(`/rider/jobs/${job.id}/fail`, { reason }));
-        toast('Reported. Please bring the package back to the sender.');
+        const updated = await api.post(`/rider/jobs/${job.id}/fail`, { reasonCode, ...(note.trim() ? { note: note.trim() } : {}) });
+        setData(updated);
+        toast(updated.returnTo ? `Reported. ${updated.returnTo.task}.` : 'Reported. Please bring the package back to the sender.');
         setProblem(false);
       }
     } catch (err) {
+      if (err.errors?.note) {
+        setNoteError('Say what happened');
+        return;
+      }
       toast(err.message);
       reload({ quiet: true });
     } finally {
@@ -194,17 +277,26 @@ export default function RiderJob() {
   // E-MOORM COD: the item money goes back to the shop, who confirms it on E-MOORM.
   const cashBack = order && job.status === 'DELIVERED' && job.codAmount > 0;
   const target = ['ACCEPTED', 'AT_PICKUP'].includes(job.status) ? 'pickup' : 'dropoff';
+  // Couldn't deliver an E-MOORM order: the parcel goes back to the shop (no steps to tap).
+  const returning = job.status === 'RETURNING';
+  const stepping = active && !returning;
 
   return (
     <MapPage title={job.code} back="/rider" compactMap={done}
-      map={<RouteMap fill pickup={job.pickup} dropoff={job.dropoff} me={active ? position : null} />}>
+      map={<RouteMap fill pickup={(returning && job.returnTo) || job.pickup} dropoff={job.dropoff} me={active ? position : null} />}>
       {order && <OrderBadge job={job} />}
       {isFree(job) && <FreeChip job={job} line />}
       <TownHop job={job} />
 
-      {active && (
+      {stepping && (
         <section className="card status-card">
           <Progress status={job.status} />
+        </section>
+      )}
+
+      {returning && (
+        <section className="card status-card">
+          <StatusBlock status={job.status} title="Not delivered" text={failText(job)} />
         </section>
       )}
 
@@ -214,10 +306,14 @@ export default function RiderJob() {
             text={{
               DELIVERED: `${dateTime(job.deliveredAt)} · you earned ${peso(job.riderEarning)}`,
               CANCELLED: job.cancelReason || 'Cancelled',
-              FAILED: `${job.failReason}. Bring the package back to ${job.pickup.name}.`,
+              FAILED: job.returnedAt
+                ? [failText(job), returnedText(job), tripPaid(job) ? `you earned ${peso(tripEarning(job))}` : 'no pay for this trip'].join(' · ')
+                : `${failText(job)}. Bring the package back to ${job.pickup.name}.`,
             }[job.status]} />
         </section>
       )}
+
+      {returning && job.returnTo && <ReturnTask job={job} />}
 
       {cashBack && (job.codReturnedAt ? (
         <p className="alert alert--ok"><CheckCircle size={20} weight="fill" /> Shop confirmed the cash ✓</p>
@@ -225,9 +321,9 @@ export default function RiderJob() {
         <p className="alert alert--warn"><Coins size={20} weight="fill" /> Bring <strong>{peso(job.codAmount)}</strong> back to {job.pickup.name}.</p>
       ))}
 
-      {active && <StepPanel job={job} onDone={setData} position={position} />}
+      {stepping && <StepPanel job={job} onDone={setData} position={position} />}
 
-      {active && (
+      {stepping && (
         <section className="section">
           <div className="section__head"><h2>{target === 'pickup' ? 'Pickup' : 'Drop-off'}</h2><span className="pill pill--grey">{target === 'pickup' ? 'A' : 'B'}</span></div>
           <div className="section__body">
@@ -245,7 +341,7 @@ export default function RiderJob() {
       )}
 
       <section className="section">
-        <div className="section__head"><h2>{active ? 'Whole route' : 'Route'}</h2></div>
+        <div className="section__head"><h2>{stepping ? 'Whole route' : 'Route'}</h2></div>
         <div className="section__body"><RouteBlock job={job} contact={active} /></div>
       </section>
 
@@ -268,9 +364,9 @@ export default function RiderJob() {
         <div className="section__body"><Timeline events={job.events} /></div>
       </section>
 
-      {active && (
+      {stepping && (
         <div className="detail-actions">
-          <button type="button" className="btn btn--danger btn--block" onClick={() => { setReason(reasons[0]); setProblem(true); }}>
+          <button type="button" className="btn btn--danger btn--block" onClick={openProblem}>
             <WarningCircle size={18} /> {beforePickup ? 'Give back this delivery' : "Can't deliver"}
           </button>
         </div>
@@ -279,20 +375,42 @@ export default function RiderJob() {
       <Sheet open={problem} onClose={() => setProblem(false)} label="Problem">
         <h2>{beforePickup ? 'Give back this delivery?' : "Can't deliver?"}</h2>
         <p>{beforePickup ? 'It goes back to other riders and the customer is told.' : 'The customer and MoorMove are told. Bring the package back to the sender.'}</p>
-        <div className="reason-list">
-          {reasons.map((r) => (
-            <label key={r} className="check">
-              <input type="radio" name="reason" checked={reason === r} onChange={() => setReason(r)} />
-              <span>{r}</span>
-            </label>
-          ))}
-        </div>
-        <Field label="Or say what happened" id="reason-other">
-          <input id="reason-other" value={reasons.includes(reason) ? '' : reason} onChange={(e) => setReason(e.target.value)} placeholder="Something else…" />
-        </Field>
+        {beforePickup ? (
+          <>
+            <div className="reason-list">
+              {GIVE_BACK.map((r) => (
+                <label key={r} className="check">
+                  <input type="radio" name="reason" checked={reason === r} onChange={() => setReason(r)} />
+                  <span>{r}</span>
+                </label>
+              ))}
+            </div>
+            <Field label="Or say what happened" id="reason-other">
+              <input id="reason-other" value={GIVE_BACK.includes(reason) ? '' : reason} onChange={(e) => setReason(e.target.value)} placeholder="Something else…" />
+            </Field>
+          </>
+        ) : (
+          <>
+            <div className="reason-list" role="radiogroup" aria-label="What happened">
+              {FAIL_REASONS.map((r) => (
+                <label key={r.code} className="check">
+                  <input type="radio" name="fail-reason" checked={reasonCode === r.code} onChange={() => { setReasonCode(r.code); setNoteError(''); }} />
+                  <span className="reason-list__text">
+                    {r.label}
+                    {order && r.buyerFault && <small>You&apos;re still paid for this trip</small>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <Field label={noteNeeded ? 'Say what happened' : 'Add a note (optional)'} id="fail-note" error={noteError}>
+              <input id="fail-note" value={note} maxLength={255} onChange={(e) => { setNote(e.target.value); setNoteError(''); }}
+                placeholder={noteNeeded ? 'What went wrong?' : 'e.g. Called 3 times, no answer'} />
+            </Field>
+          </>
+        )}
         <div className="btn-row">
           <button type="button" className="btn btn--grey" onClick={() => setProblem(false)}>Back</button>
-          <button type="button" className="btn btn--danger" onClick={report} disabled={busy || !reason.trim()}>{busy ? 'Sending…' : beforePickup ? 'Give back' : 'Report'}</button>
+          <button type="button" className="btn btn--danger" onClick={report} disabled={busy || !canReport}>{busy ? 'Sending…' : beforePickup ? 'Give back' : 'Report'}</button>
         </div>
       </Sheet>
     </MapPage>
